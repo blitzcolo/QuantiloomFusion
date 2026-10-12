@@ -7,7 +7,7 @@ Runs under Windows Python or a WSL2 Linux Python. The renderer is always the
 Windows CLI; on WSL it is invoked via interop, so the dataset must live on a
 Windows-accessible drive (under /mnt/<drive>/). Recipe identity is gated by the
 CLI `--version` string plus content hashes of the scene assets, settings and
-this script; renderer binaries are recorded for provenance but do not gate.
+the generator's package import closure; renderer binaries are recorded for provenance but do not gate.
 """
 
 import argparse

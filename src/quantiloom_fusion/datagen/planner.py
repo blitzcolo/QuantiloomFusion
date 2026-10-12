@@ -13,6 +13,7 @@ from ..core.paths import canonical_path, is_drive_path, native_path
 from ..core.tomlio import toml_text
 from ..core.vec import add, camera_pose, norm, pose, scale
 from .constants import BANDS, MODES, SCHEMA, VERSION
+from .fingerprint import generator_files, generator_fingerprint
 from .renderer import QuantiloomCli
 from .scene import canonicalize, read_gltf, reject_motion, resolve_asset, scene_for_band
 from .sensor import sensor_config
@@ -134,7 +135,8 @@ def plan(config: Path,out: Path):
         if unreachable:
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
     version=QuantiloomCli(cli).version()
-    recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':digest(Path(__file__)),
+    files=generator_files()
+    recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':generator_fingerprint(files),'generator_files':files,
             'physics_sources':physics_sources,
             'derived_assets':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in derived.items()}}
     identity=fingerprint(recipe)

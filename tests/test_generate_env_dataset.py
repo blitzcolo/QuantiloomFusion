@@ -20,7 +20,7 @@ import unittest
 from unittest.mock import patch
 
 from quantiloom_fusion.core import jsonio, locking, paths, tomlio
-from quantiloom_fusion.datagen import constants, export_record, planner, publish, renderer, scene, settings
+from quantiloom_fusion.datagen import constants, export_record, fingerprint, planner, publish, renderer, scene, settings
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -114,7 +114,10 @@ class PlanningContracts(unittest.TestCase):
         # resume a dataset: that is exactly the pre/post-fix mixing the
         # version string alone could not stop.
         self.plan()
-        self.assertTrue(jsonio.load_json(self.out/'dataset.plan.json')['recipe']['physics_sources'])
+        recipe=jsonio.load_json(self.out/'dataset.plan.json')['recipe']
+        self.assertTrue(recipe['physics_sources'])
+        self.assertIn('quantiloom_fusion/datagen/planner.py',{e['path'] for e in recipe['generator_files']})
+        self.assertEqual(recipe['generator_sha256'],fingerprint.generator_fingerprint(recipe['generator_files']))
         (self.root/'src/shaders/raygen.hlsl').write_text('// shader v2\n')
         with self.assertRaisesRegex(ValueError,'different recipe'):self.plan()
 

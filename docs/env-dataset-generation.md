@@ -220,7 +220,7 @@ python tools/generate_env_dataset.py verify `
 
 ## 断点恢复和复现
 
-计划保存配置、`--version` 版本字符串、场景及直接引用资产的内容哈希、生成脚本哈希、派生太阳光谱哈希和 `physics_sources`（开发构建树下 `src/shaders`、`src/libQuantiloom/atmos`、`src/libQuantiloom/postprocess` 的逐文件哈希，见"版本兼容"节）；CLI 可执行文件与同目录 SPIR-V／DLL／USD 资源记入 `renderer_observed`，仅供溯源。恢复时重新计算并比对：场景资产、配置、生成脚本、CLI 版本号或任一物理源文件变化都会拒绝复用旧目录（提示换用新输出目录）；同版本号下仅重新编译（无源码改动）不触发拒绝。已生成的任务 TOML 若被手动修改，也会报错。
+计划保存配置、`--version` 版本字符串、场景及直接引用资产的内容哈希、生成器指纹（`recipe.generator_sha256`：`quantiloom_fusion.datagen` 在包内的导入闭包——datagen 各模块及其用到的 `core` 模块，换行规范为 LF 后逐文件哈希，清单见 `recipe.generator_files`；消费端模块与 `datagen/audit/` 不计入）、派生太阳光谱哈希和 `physics_sources`（开发构建树下 `src/shaders`、`src/libQuantiloom/atmos`、`src/libQuantiloom/postprocess` 的逐文件哈希，见"版本兼容"节）；CLI 可执行文件与同目录 SPIR-V／DLL／USD 资源记入 `renderer_observed`，仅供溯源。恢复时重新计算并比对：场景资产、配置、生成器闭包内任一模块、CLI 版本号或任一物理源文件变化都会拒绝复用旧目录（提示换用新输出目录）；同版本号下仅重新编译（无源码改动）不触发拒绝。已生成的任务 TOML 若被手动修改，也会报错。
 
 每款相机有独立状态记录。恢复时先核验元数据哈希、全部渲染产品哈希、实际分辨率、镜头参数、内参和位姿；只有验证通过才跳过。一个波段失败或损坏不会要求重新生成另外两个已验证波段。若渲染已结束而发布步骤中断，脚本尝试接纳已经完成的输出。
 

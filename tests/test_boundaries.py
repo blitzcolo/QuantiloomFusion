@@ -164,8 +164,10 @@ def check_tree(pkg_root: Path) -> list[str]:
                 violations.append((rel, lineno, f"{subpackage} is stdlib-only at module level; got {top}"))
             if top == "subprocess" and rel != SUBPROCESS_MODULE:
                 violations.append((rel, lineno, f"subprocess may only be imported by {SUBPROCESS_MODULE}"))
-            if top in EXR_NAMES and rel != EXR_MODULE:
-                violations.append((rel, lineno, f"{top} may only be imported by {EXR_MODULE}"))
+            if top in EXR_NAMES:
+                exr_ok = rel == EXR_MODULE or (rel.startswith("datagen/") and not module_level)
+                if not exr_ok:
+                    violations.append((rel, lineno, f"{top} may only be imported by {EXR_MODULE}, or inside functions under datagen/"))
             if top in TORCH_NAMES and not torch_declared:
                 violations.append((rel, lineno, "torch may only be imported by modules declaring __optional_deps__"))
 
@@ -240,11 +242,17 @@ def test_subprocess_restricted_to_renderer(tmp_path):
 
 
 def test_openexr_restricted_to_dataset_exr(tmp_path):
-    bad = _make_tree(tmp_path / "bad", {"datagen/audit.py": "def f():\n    import OpenEXR\n"})
-    violations = check_tree(bad)
-    assert any(v.startswith("datagen/audit.py:2:") and "OpenEXR" in v for v in violations)
-    ok = _make_tree(tmp_path / "ok", {"dataset/exr.py": "import Imath\nimport OpenEXR\n"})
-    assert check_tree(ok) == []
+    ok_lazy = _make_tree(tmp_path / "ok1", {"datagen/audit.py": "def f():\n    import OpenEXR\n"})
+    assert check_tree(ok_lazy) == []
+    bad_module = _make_tree(tmp_path / "bad1", {"datagen/audit.py": "import OpenEXR\n"})
+    violations = check_tree(bad_module)
+    assert any(v.startswith("datagen/audit.py:1:") and "may only be imported" in v for v in violations)
+    assert any(v.startswith("datagen/audit.py:1:") and "stdlib-only" in v for v in violations)
+    bad_consumer = _make_tree(tmp_path / "bad2", {"fusion/x.py": "def f():\n    import OpenEXR\n"})
+    violations = check_tree(bad_consumer)
+    assert any(v.startswith("fusion/x.py:2:") and "OpenEXR" in v for v in violations)
+    ok_exr = _make_tree(tmp_path / "ok2", {"dataset/exr.py": "import Imath\nimport OpenEXR\n"})
+    assert check_tree(ok_exr) == []
 
 
 def test_torch_requires_optional_deps_marker(tmp_path):

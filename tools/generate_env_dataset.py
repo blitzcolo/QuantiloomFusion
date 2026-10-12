@@ -38,14 +38,7 @@ from quantiloom_fusion.core.locking import alive, runner_lock
 from quantiloom_fusion.core.paths import canonical_path, is_drive_path, native_path
 from quantiloom_fusion.core.tomlio import scalar, toml_text
 from quantiloom_fusion.core.vec import add, camera_pose, cross, dot, local_rotation, norm, pose, scale, unit
-
-SCHEMA = "quantiloomfusion.env_dataset"
-VERSION = 1
-BANDS = ("vis", "mwir", "lwir")
-MODES = {"vis": "vis_hero", "mwir": "mwir_fused", "lwir": "lwir_fused"}
-PATH_KEYS = {"gltf", "usd", "file", "basis_file", "materials_json", "solar_lut",
-             "forcing_file", "model_pack", "environment_map", "temperature_texture",
-             "known_psf_path", "emissive_curve", "spectral_weight_texture"}
+from quantiloom_fusion.datagen.constants import BANDS, MODES, PATH_KEYS, SCHEMA, VERSION
 
 
 def check_keys(table, allowed, name):

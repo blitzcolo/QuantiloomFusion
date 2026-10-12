@@ -10,7 +10,9 @@ Compares three ways of reducing the NN channel function to a band number:
   boxed     - trapezoid over the camera grid, each sample taking the mean of
               the channels inside its Voronoi cell (the new bake).
 
-Usage: _spectral_integration_audit.py [band]
+Usage: _spectral_integration_audit.py [band] [model_pack]
+band defaults to "all"; model_pack defaults to the Quantiloom-dev atmosphere
+model pack (H:/Quantiloom-dev/assets/atmos_models, translated on WSL).
 Prints band-mean values and relative errors per scheme.
 """
 import sys
@@ -19,9 +21,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from _closure_audit import Net, fill_row, planck_nm  # noqa: E402
-
-MODELS = Path("H:/Quantiloom-dev/assets/atmos_models")
+from quantiloom_fusion.core.paths import native_path  # noqa: E402
 
 # Night-arm weather (the 23:00 forcing values used by the smoke).
 WEATHER = dict(atmos_model=2.0, ihaze=1.0, icld=0.0, vis_km=23.0,
@@ -92,14 +94,15 @@ def evaluate(net, is_delta, band_lo_nm, band_hi_nm, samples, weight):
 
 def main():
     band = sys.argv[1] if len(sys.argv) > 1 else "all"
+    models = native_path(sys.argv[2]) if len(sys.argv) > 2 else native_path("H:/Quantiloom-dev/assets/atmos_models")
     planck300 = lambda l: planck_nm(np.asarray(l, dtype=float), 300.0)
     cases = {
         "lwir": dict(band=(8000.0, 12000.0),
-                     nets={c: (MODELS / f"lwir_ground_{c}.safetensors",
+                     nets={c: (models / f"lwir_ground_{c}.safetensors",
                                c == "tau")
                            for c in ("tau", "lpath", "ldown")}),
         "mwir": dict(band=(3000.0, 5000.0),
-                     nets={c: (MODELS / f"mwir_ground_{c}.safetensors",
+                     nets={c: (models / f"mwir_ground_{c}.safetensors",
                                c == "tau")
                            for c in ("tau", "lpath", "ldown")}),
     }

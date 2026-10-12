@@ -370,7 +370,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T0.3 | 完成 | 配置 `5622f5a` → 生成器与测试 `bad41d3`（对拍基线）→ 审计 `9d2c4b6` → 文档、README、`AGENTS.md`、本文、7 个 skill 各一个 commit；提交后两侧 unittest 均 `OK (skipped=2)` |
 | T0.4 | 完成 | 四处各一个 commit：测试数 11（`61341e0`）；证据文件与旧目录的实际位置（`81d5286`，旧 `*-ready` 目录在 `build/_archive-0.7.3-buggy/`）；示例目录改为 `*-0.7.4` 并说明命名与只能 verify 的现有目录（`f36ed47`）；pilot 配置说明（`0d29c43`，与正式配置的差异经 `tomllib` 逐键比对：仅名称、采样网格、`closure_audit_every=8`） |
 | T1.1 | 完成 | `fc6f11b`：`pyproject.toml`（uv_build、numpy+OpenEXR、torch extra、dev 组 pytest、`required-version >=0.12.10`、pytest 标记）、`.python-version`、`uv.lock`、`src/quantiloom_fusion/__init__.py`（uv_build 需要包存在）。两侧 `uv run pytest -q` 均 `9 passed, 2 skipped`；两侧 `uv lock --check` 通过；lock 中 torch 为 Linux `2.9.1`（PyPI）/ Windows `2.9.1+cu128`；torch extra 未 sync |
-| T1.2–T1.4 | 未开始 | |
+| T1.2 | 完成 | `0be6121`：9 个子包，各只有职责 docstring |
+| T1.3 | 完成 | `d78efb5`：`tests/test_boundaries.py`，`check_tree()` + 真实包检查 + 每条规则的反例测试；故意在 `fusion/__init__.py` 加 `import quantiloom_fusion.datagen` 时报 `fusion/__init__.py:2: fusion must not import quantiloom_fusion.datagen`。两侧 `uv run pytest -q` 均 `20 passed, 2 skipped` |
+| T1.4 | 未开始 | |
 | T1.5 | 完成 | `1ae708b`；`AGENTS.md` 同步（`266a9df`） |
 | T2.1–T2.16 | 未开始 | 依赖 T0.3、T1.1 |
 | T3.1–T3.9 | 未开始 | |
@@ -393,6 +395,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | `.clang-tidy`、`.clangd` 加入 `.gitignore` | 用户确认；属于 Quantiloom C++ 仓库，与本仓库无关 |
 | 2026-10-12 | `assets/`、`paper/` 保持被 gitignore | 用户确认 |
 | 2026-10-12 | 两侧 uv 统一到 0.12.10；WSL 另装独立版到 `~/.local/bin`，不动 conda base | Windows 已是 0.12.10；新版写的 lock 旧版不一定能读 |
+| 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险
@@ -413,5 +416,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 0 完成；T1.1、T1.5 完成（两侧 uv 0.12.10，`uv run pytest -q` 均 9 passed / 2 skipped）。
-- 下一步：T1.2 包骨架（§3.2 各子包的 `__init__.py` + 职责 docstring），随后 T1.3 `tests/test_boundaries.py`。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件或无空格写法。
+- 当前停在：T1.1–T1.3、T1.5 完成：uv 项目、包骨架、AST 边界测试（两侧 20 passed / 2 skipped）。
+- 下一步：T1.4 接口模块，按 §3.3 签名逐个边界落地（`dataset` 类型 → `geometry.Warp` → `signal.Normalizer` → `registration.Registrar` → `fusion` → `evaluation`），每个一个 commit。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

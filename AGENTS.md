@@ -42,11 +42,10 @@ VIS / MWIR / LWIR 三波段**未配准异构传感器**融合实验工作区。�
 | 测试（Windows 原生 PowerShell） | `$env:UV_PROJECT_ENVIRONMENT='.venv-win'; uv run pytest -q` |
 | 生成数据集 | `python tools/generate_env_dataset.py plan/run/verify ...`（只需标准库，见数据集文档） |
 
-- **`pyproject.toml` 落地之前**（见 work-guide 进度表）：测试用 `python3 -m unittest discover -s tests -v`（WSL）和
-  `/mnt/h/paper-exp/.venv/Scripts/python.exe -m unittest discover -s tests -v`（借用的 Windows 解释器，只读使用，不要往里装包）。
 - **两侧虚拟环境必须分开**：WSL 用 `$HOME/.venvs/quantiloomfusion`（ext4，避免 9p 慢且不与 Windows 冲突），Windows 用仓库内 `.venv-win`。
   不设 `UV_PROJECT_ENVIRONMENT` 就跑 uv 会在仓库里建 `.venv`，另一侧再跑会把它当成坏环境重建——不要这样做。
-- 两侧 uv 版本需一致（当前 WSL 0.9.17、Windows 0.12.10，统一前不要提交由新版本写出的 `uv.lock` 而让旧版去读）。
+- 两侧 uv 版本一致：均为 0.12.10（WSL 用 `~/.local/bin/uv` 独立安装版，排在 PATH 中 miniconda 自带的旧版之前）。`pyproject.toml` 的 `required-version` 拦住旧版 uv；升级 uv 要两侧同时升，再重写 `uv.lock`。改依赖后两侧都要 `uv lock --check` 通过。
+- `torch` 是可选 extra（`uv sync --extra torch`）；Windows 从 cu128 索引取（PyPI 的 win_amd64 版是 CPU 版），Linux 用 PyPI。
 - 渲染器：`H:/Quantiloom-dev/build/src/app/Release/Quantiloom.exe`（当前 `--version` = `Quantiloom 0.7.4`），需要 NVIDIA RTX + Vulkan RT。
 - 一个改动在两侧都跑过测试才算验证完成（用 `cross-os-test` skill）。
 

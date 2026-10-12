@@ -34,6 +34,7 @@ from quantiloom_fusion.core.paths import canonical_path, is_drive_path, native_p
 from quantiloom_fusion.core.tomlio import scalar, toml_text
 from quantiloom_fusion.core.vec import add, camera_pose, cross, dot, local_rotation, norm, pose, scale, unit
 from quantiloom_fusion.datagen.constants import BANDS, MODES, PATH_KEYS, SCHEMA, VERSION
+from quantiloom_fusion.datagen.renderer import CalledProcessError, QuantiloomCli, run_closure_audit
 from quantiloom_fusion.datagen.scene import canonicalize, nk_span_nm, read_gltf, reject_motion, resolve_asset, scene_for_band
 from quantiloom_fusion.datagen.settings import check_keys, positive, read_settings, vector
 from quantiloom_fusion.datagen.solar import solar_extension
@@ -153,7 +154,7 @@ def plan(config: Path,out: Path):
         unreachable=[e['path'] for e in closure if not is_drive_path(e['path'])]
         if unreachable:
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
-    version=subprocess.check_output([str(cli),'--version'],text=True).strip()
+    version=QuantiloomCli(cli).version()
     recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':digest(Path(__file__)),
             'physics_sources':physics_sources,
             'derived_assets':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in derived.items()}}
@@ -334,6 +335,7 @@ def run_dataset(out,plan,args,lease,lock):
         try:import OpenEXR,numpy
         except ImportError as e:raise ValueError('pixel verification requires OpenEXR and numpy; install them or choose verification="hashes"') from e
     cli=native_path(plan['recipe']['settings']['dataset']['cli']).resolve()
+    renderer=QuantiloomCli(cli)
     if POSIX and not is_drive_path(canonical_path(out)):
         raise ValueError('output directory must be reachable by the Windows CLI; '
                          'on WSL use a path under /mnt/<drive>/')
@@ -377,13 +379,11 @@ def run_dataset(out,plan,args,lease,lock):
                     atomic_json(state,{'status':'running','job_sha256':camera['job_sha256'],'attempt':attempt.relative_to(out).as_posix()})
                     print(f'RENDER {sample["sample_id"]}/{band}',flush=True)
                     with (attempt/'render.log').open('w',encoding='utf-8') as log:
-                        child=subprocess.Popen([str(cli),canonical_path(actual)],cwd=attempt,stdout=log,stderr=subprocess.STDOUT)
+                        child=renderer.start(actual,attempt,log)
                         lease['child_pid']=child.pid;atomic_json(lock,lease)
                         try:code=child.wait()
                         except KeyboardInterrupt:
                             child.terminate()
-                            try:child.wait(timeout=10)
-                            except subprocess.TimeoutExpired:child.kill();child.wait()
                             atomic_json(state,{'status':'interrupted','job_sha256':camera['job_sha256'],'attempt':attempt.relative_to(out).as_posix()})
                             raise
                         finally:lease['child_pid']=None;atomic_json(lock,lease)
@@ -411,9 +411,7 @@ def run_dataset(out,plan,args,lease,lock):
                         # verify does.
                         audit=Path(__file__).resolve().parent/'_closure_audit.py'
                         try:
-                            proc=subprocess.run([sys.executable,str(audit),str(lwir_attempt)],
-                                capture_output=True,text=True,timeout=300)
-                            report=(proc.stdout+proc.stderr).strip()
+                            report=run_closure_audit(audit,lwir_attempt)
                             (lwir_attempt/'closure_audit.txt').write_text(report+"\n",encoding='utf-8')
                             summary=[l for l in report.splitlines() if 'closure residual' in l]
                             print(f'CLOSURE {sample["sample_id"]}: {summary[0] if summary else report.splitlines()[-1] if report else "no output"}',flush=True)
@@ -472,7 +470,7 @@ def main(argv=None):
         return 0
     except KeyboardInterrupt:
         print('Interrupted. Run the same command to resume.',file=sys.stderr);return 130
-    except (ValueError,OSError,KeyError,subprocess.CalledProcessError) as e:
+    except (ValueError,OSError,KeyError,CalledProcessError) as e:
         print(f'ERROR: {e}',file=sys.stderr);return 1
 
 

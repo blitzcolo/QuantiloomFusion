@@ -50,7 +50,7 @@
 | pilot 数据集 | `build/env-pilot-0.7.4`：24/24 完整（concrete 白天/夜间/月光 × 8 方位），samples 304 MB + attempts 624 MB | 同上 |
 | 场景资产 | `H:/Quantiloom-Qt/assets/configs/env_{concrete,desert,grassland,seaside}.toml` | 文件 |
 | `src/`、`paper/`、`assets/` | 空目录 | `ls` |
-| git | 仓库基线已入库（2026-10-12）；索引与工作树全部为 LF；只剩 `.clang-tidy`、`.clangd` 未跟踪（待决） | `git log`、`git ls-files --eol`，WSL 与 Windows git `status` 一致 |
+| git | 仓库基线已入库（2026-10-12）；索引与工作树全部为 LF；工作区干净 | `git log`、`git ls-files --eol`，WSL 与 Windows git `status` 均为空 |
 
 ### 2.2 实测吞吐（决定正式采集的排期）
 
@@ -85,12 +85,12 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 ### 2.5 已发现的问题（按影响排序）
 
 1. **审计工具在 WSL 下不可用**：`_closure_audit.py`、`_spectral_integration_audit.py` 把模型包写成 `Path("H:/Quantiloom-dev/assets/atmos_models")`，Linux Python 下这是相对路径。生成器在 WSL 下运行时的周期性闭合审计因此必然报 "audit unavailable"。
-2. **换行符风险**：`.gitattributes` 为空，而 Windows 侧 `core.autocrlf=true`。若由 Windows git 检出，源文件变成 CRLF，`generator_sha256` 随之改变，"同一数据集目录跨系统交替执行"失效。
+2. ~~**换行符风险**：`.gitattributes` 为空，而 Windows 侧 `core.autocrlf=true`。若由 Windows git 检出，源文件变成 CRLF，`generator_sha256` 随之改变，"同一数据集目录跨系统交替执行"失效。~~ 已由 `1fae36e`（`* text=auto eol=lf`）解决。
 3. **生成器指纹只覆盖单文件**：包化后必须改成覆盖 datagen 的导入闭包，否则拆出去的模块改了也不会触发拒绝续跑。
 4. **interop 下中断渲染**：WSL 下 `child.terminate()` 作用于 Linux 侧 interop 代理进程，Windows 侧 `Quantiloom.exe` 是否随之退出未验证（待核实）；`alive(child_pid)` 在 WSL 下检查的也是代理进程。
 5. 数据集文档与现状不符：测试数写作"10 项"（实为 11）；证据文件写作 `docs/env-dataset-generation-evidence-2026-10-06.json`（实际在 `build/`，被 gitignore）；使用示例目录为 `build/env-smoke`、`build/env-three-band`（现有为 `*-0.7.4`）；pilot 配置未被文档提及。
 6. `sample.json` 的 `extra_products` 以文件路径为键而非产品名，消费端只能按文件名反查产品名（可在 sample schema v2 中补 `truth` 映射，需单独决策）。另外 `frame_truth_material_id.exr` 的通道名是 `instance_id`（与实例 ID 文件同名），读取器必须按文件而不是按通道名区分两者（pilot 实测）。
-7. `.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置（引用 `src/libQuantiloom`、`docs/CLAUDE_CODE_SETUP.md`），与本仓库无关（待决：不入库/删除）。
+7. ~~`.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置，与本仓库无关。~~ 已加入 `.gitignore`（`460a57a`）。
 8. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
 
 ---
@@ -291,7 +291,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 ### 阶段 0：仓库基线（只整理，不改行为）
 
 - **T0.1** `.gitattributes`：`* text=auto eol=lf`；`*.exr *.png *.glb *.bin *.safetensors binary`；`*.bat text eol=crlf`。判据：WSL 与 Windows git 下 `git status` 都干净。
-- **T0.2** `.gitignore`：`build/` 改为 `/build`（`build` 是 junction 时，WSL git 把它当符号链接，`build/` 模式不匹配，会显示 `?? build`；Windows git 不受影响——2026-10-11 在临时仓库中实测）；补 `.venv*/`、`.pytest_cache/`；确认 `assets/`、`paper/` 被忽略是否有意（待决）。
+- **T0.2** `.gitignore`：`build/` 改为 `/build`（`build` 是 junction 时，WSL git 把它当符号链接，`build/` 模式不匹配，会显示 `?? build`；Windows git 不受影响——2026-10-11 在临时仓库中实测）；补 `.venv*/`、`.pytest_cache/`、`.clang-tidy`、`.clangd`；`assets/`、`paper/` 保持忽略。
 - **T0.3** 首次入库，按"每类一个 commit"：三个配置 → 生成器+其测试（测试读取正式配置，故配置先入库） → 审计工具 → 数据集文档 → README → `AGENTS.md` → 本文 → 每个 skill 各一个。**生成器首次入库的 commit 是对拍基线**（`datagen-parity` 用 `git log --diff-filter=A` 找它）。
 - **T0.4** 修正 §2.5 第 5 条的文档不符，每处一个 commit。
 
@@ -365,7 +365,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | --- | --- | --- |
 | 调研与本文、`AGENTS.md`、skills 初稿 | 完成 | 已入库（`0b225f4`、`abfa13c`、`1c2e5ee`…`9e8ad20`） |
 | T0.1 | 完成 | `1fae36e`；WSL 与 Windows（`core.autocrlf=true`）git `status` 均干净 |
-| T0.2 | 完成（一项待决） | `0c79007`：`/build`、`.venv*/`、`.pytest_cache/`；`assets/`、`paper/` 是否该忽略仍待用户确认 |
+| T0.2 | 完成 | `0c79007`：`/build`、`.venv*/`、`.pytest_cache/`；`460a57a`：`.clang-tidy`、`.clangd`；`assets/`、`paper/` 保持忽略 |
 | T0.3 | 完成 | 配置 `5622f5a` → 生成器与测试 `bad41d3`（对拍基线）→ 审计 `9d2c4b6` → 文档、README、`AGENTS.md`、本文、7 个 skill 各一个 commit；提交后两侧 unittest 均 `OK (skipped=2)` |
 | T0.4 | 未开始 | |
 | T1.1–T1.5 | 未开始 | |
@@ -387,14 +387,13 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-11 | 配方指纹改为 datagen 导入闭包 | 包化后单文件哈希不再完整；同时避免消费端改动误伤续跑 |
 | 2026-10-12 | `build/` 改为指向 `H:\QuantiloomFusion-build` 的 junction | 用户确认并执行；机械盘空间大，代码和 venv 留在 SSD |
 | 2026-10-12 | datagen 对拍基线 = `bad41d3`（生成器首次入库） | `datagen-parity` 用 `git log --diff-filter=A` 自动找到它 |
-| 2026-10-12 | `.clang-tidy`、`.clangd` 暂不入库，留在工作区 | 属于 Quantiloom C++ 仓库；删除与否等用户决定 |
+| 2026-10-12 | `.clang-tidy`、`.clangd` 加入 `.gitignore` | 用户确认；属于 Quantiloom C++ 仓库，与本仓库无关 |
+| 2026-10-12 | `assets/`、`paper/` 保持被 gitignore | 用户确认 |
 
 ## 8. 待决问题与风险
 
 待决：
 
-- `.clang-tidy` / `.clangd` 是否删除（建议不入库）。
-- `assets/`、`paper/` 被 gitignore 是否有意。
 - 正式采集规模：按实测约 264 GPU 小时；是否先跑一个子集（如每场景 8 方位）以尽早开始阶段 4 的真实数据实验。
 - 工况标签是否在配置/样本清单中显式化（目前只能从 `scene_id` 后缀推导）。
 - `sample.json` 是否升 v2（真值按产品名索引）。

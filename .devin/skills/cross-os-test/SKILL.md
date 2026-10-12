@@ -26,7 +26,7 @@ cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run pytest -q"
 - 需要 torch 的测试在未装 `torch` extra 时应跳过而非失败；要跑它们加 `--extra torch`（Windows 下载约 2.4 GB）。
 - 默认不跑 `gpu` 标记的测试。要跑：`-m gpu`（需要渲染器与 RTX GPU，且不能和正在进行的正式采集抢 GPU，先查 `tasklist.exe | grep -i quantiloom`）。
 
-基线：两侧都是 `9 passed, 2 skipped`（2026-10-12，uv 0.12.10）。改了依赖后两侧都跑一次 `uv lock --check`。
+基线：两侧都是 `78 passed, 2 skipped`（2026-10-12，uv 0.12.10）；设置 `QUANTILOOM_TEST_DATASET` 指向一次跑完的 smoke 目录时为 `80 passed`。改了依赖后两侧都跑一次 `uv lock --check`。
 
 ## 真实数据集测试
 

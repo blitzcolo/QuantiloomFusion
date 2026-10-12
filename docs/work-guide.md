@@ -262,6 +262,8 @@ def register(name: str): ...          # 装饰器
 def create(name: str, **config) -> FusionMethod
 ```
 
+实现：`fusion/align.py` 的 `aligned_sources(x)` 把各波段重采样到参考网格（参考波段原样，其余经 `apply_warp` 线性插值；warp 无效处用参考图像值填充，使融合退化为参考），同时返回各波段 support 掩码供指标使用；`colourize(fused_y, vis_rgb)` 把融合 Y 与 VIS 的 Cb/Cr 合回 RGB。`fusion/classical.py` 从 paper-exp 移植经典基线并推广到 N 波段，注册名 `average`（可选 `weights` 按波段加权，未指定的均分剩余权重）、`max_abs`、`laplacian_pyramid`（各级取 |系数| 最大者，基准层取均值）；三者 `needs_registration=True`，输出 `extras["support"]` 携带各波段掩码。
+
 **B8 评价**（`evaluation/`）
 
 ```python
@@ -273,6 +275,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
     def has(self, key) -> bool: ...
     def append(self, key, values: dict) -> None: ...
 ```
+
+指标从 paper-exp 移植：`evaluation/no_reference.py`（EN/SD/SF/AG，0–255 显示尺度，支持区域掩码）与 `evaluation/full_ref.py`（PSNR/SSIM）逐字搬运；`evaluation/source_ref.py` 中 `scd`/`qabf`/`ms_ssim_fusion` 逐字搬运，另有我们的 N 源推广 `scd_n`/`qabf_n`/`ms_ssim_fusion_n`（双源输入时与原式相等，docstring 注明属自行推广而非已发表定义）。`evaluation/metrics.py` 提供 `Metric` 包装类 `Entropy/StandardDeviation/SpatialFrequency/AverageGradient/SCD/Qabf/MsSsim`（name 取 `EN/SD/SF/AG/SCD/Qabf/MS_SSIM`，`version=1`），统一在融合输出 Y（BT.601 亮度）上评分；评价区域 = 所有波段 support 的交集，源参考指标另把各波段 support 传给 `*_n`（某波段仅在自身足迹内参与）。
 
 实验配置用 TOML（与 `configs/` 一致，标准库 `tomllib` 双系统可读），放 `configs/experiments/`；输出到 `build/experiments/<name>/`。
 
@@ -404,7 +408,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T3.9 | 进行中 | 首个数据点：pilot 全部 72 个 rawdn（24 样本 × 3 波段）读取，WSL 0.85 s（11.8 ms/个）vs Windows 0.10 s（1.4 ms/个），经 9p 读 H 盘约慢 8 倍（`build/_refactor/pilot_reader_check.py`，热缓存，待用更大读量与冷缓存复测） |
 | T4.1 | 完成 | `4a00166`（`Observation.readout`：CFA、ADC 位深、黑电平、曝光、白平衡、色彩矩阵，取自渲染器实际使用的相机配置）、`d49eb09`（BT.601 全范围 YCbCr、双线性去马赛克）、`8666dc3`（`VisDisplay`、`VisRawLinear(scale=adc|percentile)`、`IrLinear`、`IrTemperature`）。pilot 实测：只有 RGGB 相位使去马赛克 RAW 与线性化 display 在三个通道上都是 1/4095 的比值（R 相关 0.76–0.95；B 通道信号弱、相关低但比值正确）。夜间 display 亮度中位 0.0003，`percentile` 缩放可拉起（尺度 5 DN 对 4095）。注意：EXR 通道按字典序存放，读 RGB 产品必须显式给通道顺序（`normalized_input` 已处理）。两侧 127 passed / 10 skipped |
 | T4.2 | 完成 | `d0cf988`：`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`。pilot 24 样本对 oracle 的 EPE 中位（源像素）：VIS→LWIR resize 1.86 / 无穷远单应 1.16；LWIR→VIS 3.24 / 2.02；VIS→MWIR 2.11 / 1.28；MWIR→LWIR 3.27 / 1.99。VIS→LWIR 单应误差随深度：<5 m 2.55、5–10 m 1.53、10–20 m 0.83、20–50 m 0.39、>50 m 0.20 px（与 f·b/z 一致），58% 的 oracle 有效像素误差 > 1 px（`build/_geom/measure_registrars.py`） |
-| T4.3–T4.7 | 未开始 | |
+| T4.3 | 完成 | 依赖按 paper-exp `uv.lock` 精确钉死（opencv-python-headless 5.0.0.93、scipy 1.18.0/1.17.1、scikit-image 0.26.0）；`fusion/align.py`（`aligned_sources`、`colourize`）与 `fusion/classical.py`（`average`、`max_abs`、`laplacian_pyramid`，移植自 `paper_exp/baselines/classical.py` ab70a3d）。与 paper-exp 双源等价：average/max_abs 逐位一致，laplacian_pyramid 最大差 1.8e-7 |
+| T4.4 | 完成 | `evaluation/{no_reference,source_ref,full_ref}.py` 移植自 paper-exp（no_reference/source_ref @42024cd，full_ref @ab70a3d），源参考指标另有 N 源推广 `*_n`（双源等价已测）；`evaluation/metrics.py` 包装为 `Metric`（EN/SD/SF/AG/SCD/Qabf/MS_SSIM，version=1，评 Y，区域为各波段 support 交集） |
+| T4.5–T4.7 | 未开始 | |
 | T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 
@@ -451,5 +457,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 3 的 T3.1–T3.7 与 T4.2 完成。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
-- 下一步：待用户决定 T4.1 的 VIS 输入形式；随后 T4.3/T4.4 从 paper-exp 移植经典基线与指标（`port-from-paper-exp`），T4.5 第一次端到端（pilot/子集上「波段子集 × 经典基线 × oracle/单应配准」）。子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。
+- 当前停在：阶段 3 的 T3.1–T3.7 与 T4.1–T4.4 完成。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
+- 下一步：T4.5 `ResultStore` + `experiments` 驱动，第一次端到端（pilot/子集上「波段子集 × 经典基线 × oracle/单应配准」）；再 T4.6 互补信息量化、T4.7 任务驱动评价。子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。

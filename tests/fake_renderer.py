@@ -84,11 +84,29 @@ class FakeRenderer:
             right[2], down[2], forward[2], position[2],
             0, 0, 0, 1,
         ]
+        world_to_camera = [
+            right[0], right[1], right[2], -(right[0] * position[0] + right[1] * position[1] + right[2] * position[2]),
+            down[0], down[1], down[2], -(down[0] * position[0] + down[1] * position[1] + down[2] * position[2]),
+            forward[0], forward[1], forward[2], -(forward[0] * position[0] + forward[1] * position[1] + forward[2] * position[2]),
+            0, 0, 0, 1,
+        ]
         geometry = {
             "camera_model": "brown_conrady",
             "camera_axes": "right_down_forward",
             "intrinsics": intrinsics,
             "camera_to_world": camera_to_world,
+            "world_to_camera": world_to_camera,
+            "distortion": {
+                "model": "brown_conrady",
+                "coefficient_order": "k1_k2_p1_p2_k3",
+                "coefficients": [0.0] * 5,
+                "max_theta_radians": 1.5,
+            },
+            "width": w,
+            "height": h,
+            "pixel_center_offset": [0.5, 0.5],
+            "pixel_origin": "top_left",
+            "world_units_to_meters": 1.0,
         }
         sensor_toml = toml_text({"sensor": job["sensor"]})
         record_id = uuid.uuid4().hex * 2

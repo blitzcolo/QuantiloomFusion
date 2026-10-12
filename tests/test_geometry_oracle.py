@@ -22,11 +22,14 @@ from quantiloom_fusion.geometry import (
 DATASET = os.environ.get("QUANTILOOM_TEST_DATASET")
 
 
-def geometry(w, h, f, distortion=(0.0,) * 5, t=(0.0, 0.0, 0.0), pitch=0.0):
-    """Pinhole/distorted camera pitched down about its right (x) axis."""
+def geometry(w, h, f, distortion=(0.0,) * 5, t=(0.0, 0.0, 0.0), pitch=0.0, yaw=0.0):
+    """Pinhole/distorted camera: pitch down about right (x), yaw about down (y)."""
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
     c2w = np.eye(4)
-    c, s = np.cos(pitch), np.sin(pitch)
-    c2w[:3, :3] = np.array([[1.0, 0.0, 0.0], [0.0, c, s], [0.0, -s, c]])
+    c2w[:3, :3] = np.array(
+        [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]]
+    ) @ np.array([[1.0, 0.0, 0.0], [0.0, cp, sp], [0.0, -sp, cp]])
     c2w[:3, 3] = t
     return CameraGeometry(
         width=w,

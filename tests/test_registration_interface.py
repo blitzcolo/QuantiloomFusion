@@ -1,11 +1,8 @@
-"""Interface tests for the Registrar ABC and registration_error."""
+"""Interface tests for the Registrar ABC."""
 
-import numpy as np
 import pytest
 
-from quantiloom_fusion.core.bands import Band
-from quantiloom_fusion.geometry import Warp
-from quantiloom_fusion.registration import Registrar, registration_error
+from quantiloom_fusion.registration import Registrar
 
 
 class IdentityRegistrar(Registrar):
@@ -15,15 +12,6 @@ class IdentityRegistrar(Registrar):
         return None
 
 
-def make_warp() -> Warp:
-    return Warp(
-        ref_band=Band.VIS,
-        src_band=Band.LWIR,
-        map_xy=np.zeros((2, 2, 2), dtype=np.float32),
-        valid=np.ones((2, 2), dtype=bool),
-    )
-
-
 def test_registrar_is_abstract():
     with pytest.raises(TypeError):
         Registrar()
@@ -31,8 +19,3 @@ def test_registrar_is_abstract():
 
 def test_subclass_instantiates():
     assert IdentityRegistrar().name == "identity"
-
-
-def test_registration_error_stub():
-    with pytest.raises(NotImplementedError):
-        registration_error(make_warp(), make_warp())

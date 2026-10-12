@@ -85,7 +85,7 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 
 ### 2.5 已发现的问题（按影响排序）
 
-1. **审计工具在 WSL 下不可用**：`_closure_audit.py`、`_spectral_integration_audit.py` 把模型包写成 `Path("H:/Quantiloom-dev/assets/atmos_models")`，Linux Python 下这是相对路径。生成器在 WSL 下运行时的周期性闭合审计因此必然报 "audit unavailable"。
+1. ~~**审计工具在 WSL 下不可用**：`_closure_audit.py`、`_spectral_integration_audit.py` 把模型包写成 `Path("H:/Quantiloom-dev/assets/atmos_models")`，Linux Python 下这是相对路径。生成器在 WSL 下运行时的周期性闭合审计因此必然报 "audit unavailable"。~~ 已修（T2.14）：闭合审计从 `capture.toml` 的 `atmosphere.model_pack` 取模型包，光谱积分审计默认值经 `native_path`。
 2. ~~**换行符风险**：`.gitattributes` 为空，而 Windows 侧 `core.autocrlf=true`。若由 Windows git 检出，源文件变成 CRLF，`generator_sha256` 随之改变，"同一数据集目录跨系统交替执行"失效。~~ 已由 `1fae36e`（`* text=auto eol=lf`）解决。
 3. **生成器指纹只覆盖单文件**：包化后必须改成覆盖 datagen 的导入闭包，否则拆出去的模块改了也不会触发拒绝续跑。
 4. **interop 下中断渲染**：WSL 下 `child.terminate()` 作用于 Linux 侧 interop 代理进程，Windows 侧 `Quantiloom.exe` 是否随之退出未验证（待核实）；`alive(child_pid)` 在 WSL 下检查的也是代理进程。
@@ -321,7 +321,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 - **T2.11** `datagen.cli` + `tools/generate_env_dataset.py` 薄壳；测试改为导入包
 - **T2.12** ⚠ 配方指纹改为导入闭包规则（§3.4）。判据：改闭包内 `core` 模块 → 拒绝续跑；改 `dataset/` 模块 → 不受影响；两侧算出的 `dataset_id` 相同。
 - **T2.13** `FakeRenderer` + 无 GPU 的 run/publish/恢复/损坏检测/verify 测试
-- **T2.14** 审计工具迁入 `datagen/audit/`：模型包路径从计划的 `atmosphere_model_pack` 经 `native_path` 解析；生成器改为进程内调用审计。判据：WSL 下对 pilot 的一个 LWIR attempt 跑通闭合审计。
+- **T2.14** 审计工具修复：模型包路径从 `capture.toml` 的 `atmosphere.model_pack` 经 `native_path` 解析。审计保留为 `tools/` 下的独立脚本、由生成器以子进程调用（见决策记录）。判据：WSL 下对 pilot 的一个 LWIR attempt 跑通闭合审计。
 - **T2.15** 收尾验证：两侧对 smoke 与正式配置做全量对拍；用新包实跑 smoke（`datagen-smoke`），`verify --inspect-exr` 得到 `complete=6`、`planned=6`；更新数据集文档中的命令与指纹描述。
 - **T2.16** 验证 interop 中断行为（§2.5 第 4 条）：WSL 下 Ctrl+C 后检查 `tasklist.exe` 中是否残留 `Quantiloom.exe`；若残留，在 `QuantiloomCli` 中补 Windows 侧终止方案。
 
@@ -376,7 +376,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T1.5 | 完成 | `1ae708b`；`AGENTS.md` 同步（`266a9df`） |
 | T2.1–T2.11 | 完成 | 17 个 commit（`1dbe826`…`eb94380`）：core（paths、hashing/jsonio/tomlio、locking、vec）→ datagen（constants、settings、scene、solar、sensor、renderer、export_record、planner、publish、index、runner+verify、cli）；`tools/generate_env_dataset.py` 现为 11 行薄壳。**每一步**都在 smoke 配置上 `PARITY OK`（目录 `build/_parity/20261012-0947*`…`-101558-17-cli`），两侧 pytest 通过，两个裸解释器 `--help` 输出一致。AST 逐函数比对：原 43 个函数中 40 个逐字节相同，只有 `plan`（`is_drive_path`、`QuantiloomCli.version()`）、`run_dataset`（`is_drive_path`、`renderer.start`、`RenderProcess.terminate`、`run_closure_audit`、审计脚本路径改为从仓库根定位）、`main`（`CalledProcessError` 来自 renderer）有意改动。`RenderProcess.terminate` 在两侧用真实子进程验证过。测试改为直接导入包（61 passed / 2 skipped）。顺带：`test_boundaries` 放宽为 datagen 函数内可惰性导入 OpenEXR（`24915e5`，与 AGENTS.md 原有约定一致） |
 | T2.12 | 完成 | `b74fb8e`：`datagen/fingerprint.py`；闭包 24 个文件（13 个 datagen 模块 + 7 个 core 模块 + 4 个 `__init__`），`core/bands.py` 与消费端不在内。smoke 与正式配置对拍均 `PARITY OK`（`build/_parity/20261012-102129-fp-smoke`、`-102152-fp-formal`，后者 7785 个文件）；WSL 与 Windows 规划到同一目录时 `dataset.plan.json` 逐字节相同（`dataset_id` `b8da87a5…`，`build/_parity/20261012-102242-crossos2`）。两侧 67 passed / 2 skipped |
-| T2.13–T2.16 | 未开始 | |
+| T2.13 | 完成 | `46d6d5a`（`plan`/`run_dataset` 可注入渲染器，CLI 不变，smoke 对拍 OK）、`da78a81`（`tests/fake_renderer.py` + `tests/test_datagen_run.py`：完整运行、续跑空操作、失败重试、keep-going、产品损坏修复、未发布 attempt 恢复、中断、采集预算，共 8 项）。两侧 75 passed / 2 skipped |
+| T2.14 | 完成 | `32a0a89`、`e3bfba9`：闭合审计与光谱积分审计改为经 `native_path` 取模型包。pilot `concrete_a007_e00_r00_n00/lwir/attempt-0001`：旧脚本在 WSL 下 `FileNotFoundError`（复现缺陷）；新旧脚本在 Windows 下输出逐字节相同；新脚本在 WSL 下与存档 `closure_audit.txt` 一致（`mean=-2.234 rms=6.384`）；经 `run_closure_audit` 调用同样得到 residual 行。光谱审计两侧输出一致 |
+| T2.15–T2.16 | 未开始 | |
 | T3.1–T3.9 | 未开始 | |
 | T4.1–T4.7 | 未开始 | |
 | T5.1–T5.4 | 未开始 | T5.1 依赖 T2.15 完成并冻结 |
@@ -399,6 +401,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | 两侧 uv 统一到 0.12.10；WSL 另装独立版到 `~/.local/bin`，不动 conda base | Windows 已是 0.12.10；新版写的 lock 旧版不一定能读 |
 | 2026-10-12 | datagen 中的 `BANDS` 仍是普通字符串元组，不改用 `core.bands.Band` | 零风险保持任务 TOML 与指纹逐字节不变；类型化的 `Band` 只给消费端用 |
 | 2026-10-12 | 拆包期间每步产出补丁、由 lead 逐个审阅后各自提交 | 一事一提交，同时每步都有对拍与双系统测试的证据 |
+| 2026-10-12 | 审计保留为 `tools/` 下的独立脚本，以子进程调用，不迁入 `datagen/audit/` | 子进程隔离 + 300 s 超时在 11 天长跑中更稳；审计在模块级依赖 numpy/OpenEXR/safetensors，放进 datagen 会破坏"仅标准库"约束；它们本就不进配方指纹 |
+| 2026-10-12 | `FakeRenderer` 放在 `tests/`，不进包 | 只给测试用；放进 datagen 会无谓地进入配方指纹 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
@@ -420,5 +424,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：T2.1–T2.12 完成：生成器已拆包，配方指纹覆盖 datagen 导入闭包（`recipe.generator_files`）。
-- 下一步：T2.13 `FakeRenderer` + 无 GPU 的 run/publish/恢复/损坏/verify 测试；然后 T2.14 审计迁入、T2.15 收尾验证（含真实 smoke 渲染）、T2.16 interop 中断验证。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：T2.1–T2.14 完成：生成器已拆包、配方指纹覆盖导入闭包、无 GPU 的运行路径测试、审计在 WSL 下可用。
+- 下一步：T2.15 收尾验证（两侧全量对拍、用新包真实渲染 smoke 并 `verify --inspect-exr`、更新数据集文档的命令与指纹描述），T2.16 interop 中断验证（需要 GPU）。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

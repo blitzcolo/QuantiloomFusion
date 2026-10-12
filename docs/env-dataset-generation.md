@@ -364,7 +364,7 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 - `dataset.acquisition_index` 逐采集不同并计入 manifest；`per_acquisition` 下同波段 `noise_seed` 恒定（FPN 图样跨帧一致、时域噪声独立，源码级保证由测试锁定）；
 - 新真值产品 `truth_surface_temperature`/`truth_material_id`/`truth_materials.json` 逐采集产出，材质清单含波段等效发射率与发射率模型来源。
 
-早期 QA 结果另存于 `docs/env-dataset-generation-evidence-2026-10-06.json`，记录的是 Quantiloom 0.7.0 时代的计划与渲染，属历史证据，不代表当前 0.7.4 二进制；`build/env-three-band-ready`、`build/env-smoke-ready` 两个旧目录的配方与现版本不兼容，不能直接续跑；修复前 0.7.3 构建下的 smoke 目录已封存于 `build/_archive-0.7.3-buggy/`。
+早期 QA 结果另存于 `build/env-dataset-generation-evidence-2026-10-06.json`（`build/` 不入库，仅本机可见），记录的是 Quantiloom 0.7.0 时代的计划与渲染，属历史证据，不代表当前 0.7.4 二进制；修复前 0.7.3 构建下的 smoke 目录以及更早的 `env-three-band-ready`、`env-smoke-ready` 等旧目录已封存于 `build/_archive-0.7.3-buggy/`，其配方与现版本不兼容，不能直接续跑。
 
 ## 附：Quantiloom 能力清单
 

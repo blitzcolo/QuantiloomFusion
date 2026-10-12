@@ -1,0 +1,436 @@
+# Fixed camera profiles throughout this dataset; use a new --out after changes.
+[dataset]
+name = "env_static_three_band_v1"
+qt_root = "H:/Quantiloom-Qt"
+cli = "H:/Quantiloom-dev/build/src/app/Release/Quantiloom.exe"
+seed = 20261006
+spp = 32
+wavelength_samples = 12
+# authored: scene temperatures; solved: original forcing/thermal solver.
+thermal_mode = "solved"
+atmosphere_mode = "source"
+# One NN pack for the whole dataset: atmospheric state is a recipe-level
+# variable, not something each scene may resolve differently.
+atmosphere_model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+# Labelled modelling assumption extending the source solar CSV beyond 4 um.
+solar_ir_policy = "planck_tail"
+# constant: strip spectral bindings in IR, authored emissivity only.
+# spectral: merged library bindings render measured spectra in every band.
+ir_materials = "spectral"
+# per_acquisition: one detector seed per band (PRNU/DSNU fixed-pattern maps
+# hold still across views, like a real camera) while dataset.acquisition_index
+# draws a distinct temporal-noise realisation per capture.
+# per_sample: every capture draws all noise classes fresh, FPN included.
+# fixed_detector: legacy shared stream, FPN and temporal noise both repeat.
+noise_seed_policy = "per_acquisition"
+# Emit per-pixel depth/world/normal/validity/instance/material/temperature
+# truth per camera.
+geometry_truth = true
+verification = "pixels"
+closure_audit_every = 50
+
+# Full Cartesian product; every tuple always produces all three bands.
+[sampling]
+azimuths_deg = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345]
+elevations_deg = [5, 12, 25]
+radius_scales = [0.8, 1.0, 1.25]
+repeats = 1
+
+[[scenes]]
+id = "concrete"
+config = "env_concrete.toml"
+[[scenes]]
+id = "desert"
+config = "env_desert.toml"
+[[scenes]]
+id = "grassland"
+config = "env_grassland.toml"
+[[scenes]]
+id = "seaside"
+config = "env_seaside.toml"
+
+# VIS-failure arm: the same four scenes at 23:00 under the same rig. Overrides
+# replace whole named sections, so each night variant restates [lighting]
+# (sun and solar_lut removed, sky zeroed), [thermal] (same forcing file,
+# solved to hour 23) and [atmosphere] (same NN preset, ground temperature and
+# humidity taken from the forcing row at 23:00, not kept at day values).
+# atmosphere_temperature_k follows the forcing sky_temperature_k; the sun
+# direction is the real below-horizon solar position at 23:00.
+[[scenes]]
+id = "concrete_night"
+config = "env_concrete.toml"
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [-0.307151, -0.928486, 0.208740]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+atmosphere_temperature_k = 284.68
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 298.8
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/concrete_day.csv"
+[scenes.overrides.atmosphere]
+preset = "urban_haze"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 5
+icld = 0
+vis_km = 8
+rainrt_mm_h = 0
+t_ground_K = 300.0
+air_temperature_k = 300.0
+rh = 0.48
+relative_humidity = 48
+p_hPa = 1010
+h2o_scale = 1
+sky_model = "isotropic"
+
+[[scenes]]
+id = "desert_night"
+config = "env_desert.toml"
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [0.414719, -0.866897, -0.276583]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+atmosphere_temperature_k = 271.76
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 293.5
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/desert_day.csv"
+[scenes.overrides.atmosphere]
+preset = "turbulent_clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 1
+icld = 0
+vis_km = 18
+rainrt_mm_h = 0
+t_ground_K = 296.75
+air_temperature_k = 296.75
+rh = 0.19
+relative_humidity = 19
+p_hPa = 1010
+h2o_scale = 1
+sky_model = "isotropic"
+
+[[scenes]]
+id = "grassland_night"
+config = "env_grassland.toml"
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [-0.195863, -0.958820, -0.205676]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+atmosphere_temperature_k = 269.59
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 286.9
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/grassland_day.csv"
+[scenes.overrides.atmosphere]
+preset = "clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+t_ground_K = 288.25
+
+[[scenes]]
+id = "seaside_night"
+config = "env_seaside.toml"
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [-0.159778, -0.959805, -0.230748]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+atmosphere_temperature_k = 280.58
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 293.2
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/seaside_day.csv"
+[scenes.overrides.atmosphere]
+preset = "clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 1
+icld = 0
+vis_km = 30
+rainrt_mm_h = 0
+t_ground_K = 294.0
+air_temperature_k = 294.0
+rh = 0.80
+relative_humidity = 80
+p_hPa = 1013.25
+h2o_scale = 1
+sky_model = "isotropic"
+
+# Low-light arm: the same four scenes with the solar spectrum scaled by
+# 2e-6 (roughly a full-moon-equivalent 0.2 lux against ~1e5 lux direct
+# sun). The sun sits at 5 deg elevation: below the horizon the NN baker
+# zeroes solar-scatter terms entirely, while at zenith 85 deg it evaluates
+# a grazing-sun atmosphere whose path radiance is twilight-level -- so the
+# scaled solar LUT is the moon and the atmosphere stays self-consistent.
+# A day-elevation sun would instead bake a daylight path-radiance dome that
+# no LUT scaling can reach. VIS takes a 1 s exposure -- at the 50 us
+# daylight setting a physically scaled moon is photon-starved, not
+# SNR-limited. Scene lamps do not scale with the sun and clip at this
+# exposure, as a real night camera would see them. MWIR and LWIR are
+# unchanged thermal emission (solved at 23:00). solar_scale is applied to
+# the derived solar CSV by the generator, never to the renderer.
+[[scenes]]
+id = "concrete_moonlight"
+config = "env_concrete.toml"
+solar_scale = 2e-6
+vis_exposure_s = 1.0
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [-0.728571, 0.087156, 0.679403]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
+atmosphere_temperature_k = 284.68
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 298.8
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/concrete_day.csv"
+[scenes.overrides.atmosphere]
+preset = "urban_haze"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 5
+icld = 0
+vis_km = 8
+rainrt_mm_h = 0
+t_ground_K = 300.0
+air_temperature_k = 300.0
+rh = 0.48
+relative_humidity = 48
+p_hPa = 1010
+h2o_scale = 1
+sky_model = "isotropic"
+
+[[scenes]]
+id = "desert_moonlight"
+config = "env_desert.toml"
+solar_scale = 2e-6
+vis_exposure_s = 1.0
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [0.865326, 0.087156, 0.493573]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
+atmosphere_temperature_k = 271.76
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 293.5
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/desert_day.csv"
+[scenes.overrides.atmosphere]
+preset = "turbulent_clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 1
+icld = 0
+vis_km = 18
+rainrt_mm_h = 0
+t_ground_K = 296.75
+air_temperature_k = 296.75
+rh = 0.19
+relative_humidity = 19
+p_hPa = 1010
+h2o_scale = 1
+sky_model = "isotropic"
+
+[[scenes]]
+id = "grassland_moonlight"
+config = "env_grassland.toml"
+solar_scale = 2e-6
+vis_exposure_s = 1.0
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [0.828788, 0.087156, 0.552733]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "../luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
+atmosphere_temperature_k = 269.59
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 286.9
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/grassland_day.csv"
+[scenes.overrides.atmosphere]
+preset = "clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+t_ground_K = 288.25
+
+[[scenes]]
+id = "seaside_moonlight"
+config = "env_seaside.toml"
+solar_scale = 2e-6
+vis_exposure_s = 1.0
+[scenes.overrides]
+[scenes.overrides.lighting]
+sun_direction = [0.297903, 0.087156, -0.950609]
+sun_radiance = [0.0, 0.0, 0.0]
+sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
+atmosphere_temperature_k = 280.58
+[scenes.overrides.thermal]
+enabled = true
+time_h = 23.0
+start_time_h = 0.0
+timestep_s = 120.0
+layers = 8
+initial = "uniform"
+initial_temperature_k = 293.2
+sun_irradiance_w_m2 = 0.0
+diffuse_irradiance_w_m2 = 0.0
+exchange_rays = 128
+exchange_top_k = 16
+checkpoint_stride_h = 4
+forcing_file = "../forcing/seaside_day.csv"
+[scenes.overrides.atmosphere]
+preset = "clear"
+model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+atmos_model = 2
+ihaze = 1
+icld = 0
+vis_km = 30
+rainrt_mm_h = 0
+t_ground_K = 294.0
+air_temperature_k = 294.0
+rh = 0.80
+relative_humidity = 80
+p_hPa = 1013.25
+h2o_scale = 1
+sky_model = "isotropic"
+
+# Offsets: local right/down/forward in metres. Rotations: yaw/pitch/roll degrees.
+[cameras.vis]
+resolution = [640, 360]
+fov_y_deg = 45.0
+pixel_pitch_um = 5.0
+f_number = 4.0
+exposure_s = 0.00005
+offset_rdf_m = [0.0, 0.0, 0.0]
+rotation_ypr_deg = [0.0, 0.0, 0.0]
+psf_sigma_px = 0.45
+read_noise_e_rms = 3.0
+prnu_sigma = 0.005
+dsnu_e_rms = 0.5
+full_well_e = 20000.0
+electrons_per_dn = 5.0
+adc_bits = 12
+warmup_s = 0.0
+distortion = [-0.01, 0.001, 0.0002, -0.0001, 0.0]
+noise_free = false
+
+[cameras.mwir]
+resolution = [320, 256]
+fov_y_deg = 38.0
+pixel_pitch_um = 15.0
+f_number = 2.5
+exposure_s = 0.00015
+offset_rdf_m = [0.035, 0.002, 0.008]
+rotation_ypr_deg = [0.12, -0.08, 0.03]
+psf_sigma_px = 0.8
+read_noise_e_rms = 250.0
+prnu_sigma = 0.01
+dsnu_e_rms = 8.0
+full_well_e = 1000000.0
+electrons_per_dn = 122.0
+adc_bits = 14
+warmup_s = 0.0
+distortion = [-0.035, 0.003, -0.0003, 0.0005, 0.0]
+noise_free = false
+
+[cameras.lwir]
+resolution = [256, 192]
+fov_y_deg = 42.0
+pixel_pitch_um = 12.0
+f_number = 1.4
+exposure_s = 0.03
+offset_rdf_m = [-0.045, -0.003, 0.012]
+rotation_ypr_deg = [-0.15, 0.10, -0.04]
+psf_sigma_px = 1.1
+netd_k = 0.05
+responsivity_dn_w = 1000000000000.0
+time_constant_s = 0.012
+adc_bits = 14
+warmup_s = 0.06
+distortion = [-0.055, 0.005, 0.0008, -0.0006, 0.0]
+noise_free = false

@@ -1,0 +1,179 @@
+
+["dataset"]
+"name" = "env_smoke"
+"qt_root" = "H:/Quantiloom-Qt"
+"cli" = "H:/Quantiloom-dev/build/src/app/Release/Quantiloom.exe"
+"seed" = 20261006
+"spp" = 1
+"wavelength_samples" = 4
+"thermal_mode" = "solved"
+"atmosphere_mode" = "source"
+"atmosphere_model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
+"solar_ir_policy" = "planck_tail"
+"ir_materials" = "spectral"
+"noise_seed_policy" = "per_acquisition"
+"geometry_truth" = true
+"verification" = "pixels"
+"closure_audit_every" = 3
+
+["sampling"]
+"azimuths_deg" = [35]
+"elevations_deg" = [12]
+"radius_scales" = [1.0]
+"repeats" = 1
+
+[["scenes"]]
+"id" = "concrete"
+"config" = "env_concrete.toml"
+
+[["scenes"]]
+"id" = "desert"
+"config" = "env_desert.toml"
+
+[["scenes"]]
+"id" = "grassland"
+"config" = "env_grassland.toml"
+
+[["scenes"]]
+"id" = "seaside"
+"config" = "env_seaside.toml"
+
+[["scenes"]]
+"id" = "concrete_night"
+"config" = "env_concrete.toml"
+["scenes"."overrides"]
+["scenes"."overrides"."lighting"]
+"sun_direction" = [-0.307151, -0.928486, 0.208740]
+"sun_radiance" = [0.0, 0.0, 0.0]
+"sky_radiance" = [0.0, 0.0, 0.0]
+"atmosphere_temperature_k" = 284.68
+["scenes"."overrides"."atmosphere"]
+"preset" = "urban_haze"
+"model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
+"atmos_model" = 2
+"ihaze" = 5
+"icld" = 0
+"vis_km" = 8
+"rainrt_mm_h" = 0
+"t_ground_K" = 300.0
+"air_temperature_k" = 300.0
+"rh" = 0.48
+"relative_humidity" = 48
+"p_hPa" = 1010
+"h2o_scale" = 1
+"sky_model" = "isotropic"
+["scenes"."overrides"."thermal"]
+"enabled" = true
+"time_h" = 23.0
+"start_time_h" = 0.0
+"timestep_s" = 120.0
+"layers" = 8
+"initial" = "uniform"
+"initial_temperature_k" = 298.8
+"sun_irradiance_w_m2" = 0.0
+"diffuse_irradiance_w_m2" = 0.0
+"exchange_rays" = 128
+"exchange_top_k" = 16
+"checkpoint_stride_h" = 4
+"forcing_file" = "../forcing/concrete_day.csv"
+
+[["scenes"]]
+"id" = "concrete_moonlight"
+"config" = "env_concrete.toml"
+"solar_scale" = 2e-6
+"vis_exposure_s" = 1.0
+["scenes"."overrides"]
+["scenes"."overrides"."lighting"]
+"sun_direction" = [-0.728571, 0.087156, 0.679403]
+"sun_radiance" = [0.0, 0.0, 0.0]
+"sky_radiance" = [0.0, 0.0, 0.0]
+"solar_lut" = "assets/luts/astmg173.csv"
+"solar_lut_columns" = [4, 3]
+"solar_lut_diffuse_is_global" = true
+"atmosphere_temperature_k" = 284.68
+["scenes"."overrides"."atmosphere"]
+"preset" = "urban_haze"
+"model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
+"atmos_model" = 2
+"ihaze" = 5
+"icld" = 0
+"vis_km" = 8
+"rainrt_mm_h" = 0
+"t_ground_K" = 300.0
+"air_temperature_k" = 300.0
+"rh" = 0.48
+"relative_humidity" = 48
+"p_hPa" = 1010
+"h2o_scale" = 1
+"sky_model" = "isotropic"
+["scenes"."overrides"."thermal"]
+"enabled" = true
+"time_h" = 23.0
+"start_time_h" = 0.0
+"timestep_s" = 120.0
+"layers" = 8
+"initial" = "uniform"
+"initial_temperature_k" = 298.8
+"sun_irradiance_w_m2" = 0.0
+"diffuse_irradiance_w_m2" = 0.0
+"exchange_rays" = 128
+"exchange_top_k" = 16
+"checkpoint_stride_h" = 4
+"forcing_file" = "../forcing/concrete_day.csv"
+
+["cameras"]
+
+["cameras"."vis"]
+"resolution" = [64, 36]
+"fov_y_deg" = 45.0
+"pixel_pitch_um" = 5.0
+"f_number" = 4.0
+"exposure_s" = 5e-05
+"offset_rdf_m" = [0.0, 0.0, 0.0]
+"rotation_ypr_deg" = [0.0, 0.0, 0.0]
+"psf_sigma_px" = 0.45
+"read_noise_e_rms" = 3.0
+"prnu_sigma" = 0.005
+"dsnu_e_rms" = 0.5
+"full_well_e" = 20000.0
+"electrons_per_dn" = 5.0
+"adc_bits" = 12
+"warmup_s" = 0.0
+"distortion" = [-0.01, 0.001, 0.0002, -0.0001, 0.0]
+"noise_free" = false
+
+["cameras"."mwir"]
+"resolution" = [40, 32]
+"fov_y_deg" = 38.0
+"pixel_pitch_um" = 15.0
+"f_number" = 2.5
+"exposure_s" = 0.00015
+"offset_rdf_m" = [0.035, 0.002, 0.008]
+"rotation_ypr_deg" = [0.12, -0.08, 0.03]
+"psf_sigma_px" = 0.8
+"read_noise_e_rms" = 250.0
+"prnu_sigma" = 0.01
+"dsnu_e_rms" = 8.0
+"full_well_e" = 1000000.0
+"electrons_per_dn" = 122.0
+"adc_bits" = 14
+"warmup_s" = 0.0
+"distortion" = [-0.035, 0.003, -0.0003, 0.0005, 0.0]
+"noise_free" = false
+
+["cameras"."lwir"]
+"resolution" = [32, 24]
+"fov_y_deg" = 42.0
+"pixel_pitch_um" = 12.0
+"f_number" = 1.4
+"exposure_s" = 0.03
+"offset_rdf_m" = [-0.045, -0.003, 0.012]
+"rotation_ypr_deg" = [-0.15, 0.1, -0.04]
+"psf_sigma_px" = 1.1
+"netd_k" = 0.05
+"responsivity_dn_w" = 1000000000000.0
+"time_constant_s" = 0.012
+"adc_bits" = 14
+"warmup_s" = 0.06
+"distortion" = [-0.055, 0.005, 0.0008, -0.0006, 0.0]
+"noise_free" = false

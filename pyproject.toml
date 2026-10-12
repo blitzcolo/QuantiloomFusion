@@ -10,6 +10,11 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.0",
     "OpenEXR>=3.2",
+    # Pinned to the versions locked in the sibling paper-exp project.
+    "opencv-python-headless==5.0.0.93",
+    "scikit-image==0.26.0",
+    "scipy==1.18.0; python_version >= '3.12'",
+    "scipy==1.17.1; python_version == '3.11.*'",
 ]
 
 [project.optional-dependencies]

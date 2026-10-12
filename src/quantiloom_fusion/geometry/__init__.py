@@ -5,4 +5,11 @@ All package APIs use pixel-index coordinates: pixel (row i, col j) has centre
 (x, y) index coords per reference pixel.
 """
 from .camera import BrownConradyCamera, pixel_grid, to_camera, to_world
-from .warp import Warp, apply_warp, oracle_warp
+from .warp import (
+    DepthView,
+    Warp,
+    apply_warp,
+    load_depth_view,
+    oracle_diagnostics,
+    oracle_warp,
+)

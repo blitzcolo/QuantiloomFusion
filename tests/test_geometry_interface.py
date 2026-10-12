@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from quantiloom_fusion.core.bands import Band
-from quantiloom_fusion.dataset import CameraGeometry, Observation
-from quantiloom_fusion.geometry import BrownConradyCamera, Warp, apply_warp, oracle_warp
+from quantiloom_fusion.dataset import CameraGeometry
+from quantiloom_fusion.geometry import BrownConradyCamera, Warp
 
 IDENTITY16 = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 GEO_KWARGS = dict(
@@ -16,16 +16,6 @@ GEO_KWARGS = dict(
     camera_to_world=IDENTITY16,
     world_to_camera=IDENTITY16,
 )
-
-
-def make_observation() -> Observation:
-    return Observation(
-        band=Band.VIS,
-        geometry=CameraGeometry(**GEO_KWARGS),
-        spectral_mode="vis_hero",
-        products={},
-        record="samples/s/records/vis.json",
-    )
 
 
 def make_warp(h=4, w=5) -> Warp:
@@ -62,12 +52,3 @@ def test_warp_valid_construction():
 def test_warp_rejects_bad_shapes(map_xy, valid):
     with pytest.raises(ValueError):
         Warp(Band.VIS, Band.LWIR, map_xy, valid)
-
-
-def test_oracle_warp_and_apply_warp_stubs():
-    obs = make_observation()
-    warp = make_warp()
-    with pytest.raises(NotImplementedError):
-        oracle_warp(obs, obs, edge_px=2, z_rel_tol=0.05)
-    with pytest.raises(NotImplementedError):
-        apply_warp(np.zeros((4, 5)), warp)

@@ -201,7 +201,18 @@ class Warp:
     valid: np.ndarray         # (H_ref, W_ref) bool：可对应（排除未命中、遮挡、边缘带、validity 3/4）
     provenance: dict
 
-def oracle_warp(ref: Observation, src: Observation, *, edge_px: int, z_rel_tol: float) -> Warp
+@dataclass(frozen=True)
+class DepthView:
+    geometry: CameraGeometry
+    camera_z: np.ndarray        # (H, W) truth_camera_z
+    world_position: np.ndarray  # (H, W, 3) truth_world_position (X, Y, Z)
+    validity: np.ndarray        # (H, W) truth_validity
+
+def load_depth_view(dataset: ThreeBandDataset, observation: Observation) -> DepthView
+def oracle_warp(ref: DepthView, src: DepthView, *, ref_band: Band, src_band: Band,
+                edge_px: int = 1, edge_rel_tol: float = 0.02, pos_rel_tol: float = 0.005) -> Warp
+def oracle_diagnostics(ref: DepthView, src: DepthView, *, edge_px: int = 1,
+                       edge_rel_tol: float = 0.02, pos_rel_tol: float = 0.005) -> dict[str, int]
 def apply_warp(src_image: np.ndarray, warp: Warp, interp: str = "linear") -> np.ndarray
 ```
 

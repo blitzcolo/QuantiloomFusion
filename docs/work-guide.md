@@ -163,7 +163,7 @@ def read_export_record(path: Path) -> ExportRecord
 def verify_capture(record_path: Path, camera: dict, inspect_pixels: bool = False) -> CaptureSummary
 ```
 
-**B3 数据集契约**（生产端写、消费端读；消费端只依赖这些文件）
+**B3 数据集契约**（类型已落地于 `dataset/types.py`：`Sample`、`SampleParameters`、`Observation`、`Product`、`CameraGeometry`、`SignalSemantics`、`Condition` + `condition_of()`；`Band` 在 `core/bands.py`，生产端与消费端共用）（生产端写、消费端读；消费端只依赖这些文件）
 
 | 文件 | schema | 消费端用途 |
 | --- | --- | --- |
@@ -311,7 +311,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 - **T2.1** `core.host` + `core.paths`（`native_path`、`canonical_path`、可达性判断）
 - **T2.2** `core.hashing`、`core.jsonio`、`core.tomlio`
 - **T2.3** `core.locking`（`runner_lock`、`alive`）
-- **T2.4** `core.vec`（纯 Python 位姿数学）与 `core.bands`
+- **T2.4** `core.vec`（纯 Python 位姿数学）与 `core.bands`（`Band`/`BANDS` 已由 T1.4 建好，此处把生成器的 `BANDS`、`MODES` 改为引用它；`Band` 是 StrEnum，格式化结果与原字符串相同，对拍应不受影响）
 - **T2.5** `datagen.settings`（`read_settings` 与校验）
 - **T2.6** `datagen.scene`（资产解析、overrides、运动拒绝、glTF 读取、n,k 覆盖、`scene_for_band`）、`datagen.solar`、`datagen.sensor`（三个 commit）
 - **T2.7** `datagen.renderer`：`QuantiloomCli.version()` 与 `start()`；`plan` 与 `run` 改为经它调用
@@ -372,7 +372,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T1.1 | 完成 | `fc6f11b`：`pyproject.toml`（uv_build、numpy+OpenEXR、torch extra、dev 组 pytest、`required-version >=0.12.10`、pytest 标记）、`.python-version`、`uv.lock`、`src/quantiloom_fusion/__init__.py`（uv_build 需要包存在）。两侧 `uv run pytest -q` 均 `9 passed, 2 skipped`；两侧 `uv lock --check` 通过；lock 中 torch 为 Linux `2.9.1`（PyPI）/ Windows `2.9.1+cu128`；torch extra 未 sync |
 | T1.2 | 完成 | `0be6121`：9 个子包，各只有职责 docstring |
 | T1.3 | 完成 | `d78efb5`：`tests/test_boundaries.py`，`check_tree()` + 真实包检查 + 每条规则的反例测试；故意在 `fusion/__init__.py` 加 `import quantiloom_fusion.datagen` 时报 `fusion/__init__.py:2: fusion must not import quantiloom_fusion.datagen`。两侧 `uv run pytest -q` 均 `20 passed, 2 skipped` |
-| T1.4 | 未开始 | |
+| T1.4 | 完成 | 每个边界一个 commit：`a00edc0` `core.bands.Band`（StrEnum，与生成器 `BANDS` 逐值相同）→ `6307aeb` `dataset.types` → `039a772` geometry → `42ab89c` signal → `bef38e0` registration → `916f1cf` fusion（含已实现的注册表与 `check_input`）→ `1f91daf` evaluation。两侧 `uv run pytest -q` 均 `60 passed, 2 skipped`；导入全部消费端子包后 `torch` 不在 `sys.modules` |
 | T1.5 | 完成 | `1ae708b`；`AGENTS.md` 同步（`266a9df`） |
 | T2.1–T2.16 | 未开始 | 依赖 T0.3、T1.1 |
 | T3.1–T3.9 | 未开始 | |
@@ -416,5 +416,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：T1.1–T1.3、T1.5 完成：uv 项目、包骨架、AST 边界测试（两侧 20 passed / 2 skipped）。
-- 下一步：T1.4 接口模块，按 §3.3 签名逐个边界落地（`dataset` 类型 → `geometry.Warp` → `signal.Normalizer` → `registration.Registrar` → `fusion` → `evaluation`），每个一个 commit。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：阶段 1 完成（T1.1–T1.5）：uv 项目、包骨架、AST 边界测试、§3.3 全部接口形状（两侧 60 passed / 2 skipped）。
+- 下一步：阶段 2 datagen 包化，从 T2.1（`core.host` + `core.paths`）开始；每个纯重构 commit 后跑 `datagen-parity`（smoke 配置）与 `cross-os-test`。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

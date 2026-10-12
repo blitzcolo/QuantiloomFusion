@@ -1,0 +1,136 @@
+"""Tiny consumer-side dataset fixture: writes real EXRs and contract JSONs.
+
+Mirrors the published contract shape of build/env-pilot-0.7.4: sample.json,
+dataset.index.json, dataset.plan.json, and per-band EXR products including
+both uint32 id products that share the channel name "instance_id".
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+
+from quantiloom_fusion.core import jsonio
+from quantiloom_fusion.dataset import exr
+
+IDENTITY16 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def _geometry(w: int, h: int) -> dict:
+    f = h / 2.0
+    return {
+        "camera_model": "brown_conrady",
+        "camera_axes": "right_down_forward",
+        "projection": "perspective",
+        "width": w,
+        "height": h,
+        "intrinsics": [f, 0.0, w / 2, 0.0, f, h / 2, 0.0, 0.0, 1.0],
+        "camera_to_world": list(IDENTITY16),
+        "world_to_camera": list(IDENTITY16),
+        "distortion": {"model": "brown_conrady", "coefficient_order": "k1_k2_p1_p2_k3",
+                       "coefficients": [0.0] * 5, "max_theta_radians": 1.5},
+        "pixel_center_offset": [0.5, 0.5],
+        "pixel_origin": "top_left",
+        "world_units_to_meters": 1.0,
+    }
+
+
+def _signal(kind: str, unit: str, channels: list, cfa: str = "0") -> dict:
+    return {"kind": kind, "unit": unit, "transfer": "linear", "camera_cfa": cfa,
+            "channels": channels, "colour_space": "device_native", "storage": "float32"}
+
+
+def build_fixture(root: Path, samples: int = 2, size=(8, 6)) -> Path:
+    """Write a tiny dataset under root and return its path."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    dataset_id = "fixture-dataset-id"
+    sizes = {"vis": size, "mwir": (size[0] - 2, size[1] - 1), "lwir": (size[0] - 3, size[1] - 2)}
+    entries = []
+    for i in range(samples):
+        sid = f"fixture_s{i:02d}"
+        observations = {}
+        for band, (w, h) in sizes.items():
+            vdir = root / "samples" / sid / band / "v0001"
+            vdir.mkdir(parents=True, exist_ok=True)
+            rel = f"samples/{sid}/{band}/v0001"
+            geom = _geometry(w, h)
+
+            def write(name, channels, dtype=np.float32, fill=1.0):
+                a = {c: np.full((h, w), fill, dtype=dtype) for c in channels}
+                exr.write_image(vdir / name, a)
+
+            products = {}
+            for name, fname, unit in (
+                ("measurement", "frame_measurement.exr", "W/m^2/sr"),
+                ("rawdn", "frame_rawdn.exr", "dn"),
+                ("corrected", "frame_corrected.exr", "W/m^2/sr"),
+                ("display", "frame_display.exr", "1"),
+            ):
+                write(fname, ["Y"])
+                products[name] = {"path": f"{rel}/{fname}",
+                                  "signal": _signal(name, unit, ["Y"]),
+                                  "provenance": {"geometry": geom, "camera_config_toml": "[sensor]\n"},
+                                  "image_metadata": {}}
+            write("frame.exr", ["R", "G", "B", "A"])
+            products["rendered_reference"] = {"path": f"{rel}/frame.exr",
+                                              "role": "separate_ideal_pinhole_render_without_sensor_degradation",
+                                              "description": {"channel_names": ["R", "G", "B", "A"],
+                                                              "channels": 4, "height": h, "width": w}}
+            extras = {}
+
+            def extra(fname, channels, dtype=np.float32, fill=1.0, **desc):
+                write(fname, channels, dtype, fill)
+                extras[f"{rel}/{fname}"] = {"channel_names": list(channels), "channels": len(channels),
+                                            "height": h, "width": w, **desc}
+
+            extra("frame_truth_camera_z.exr", ["camera_z_m"], fill=10.0)
+            extra("frame_truth_validity.exr", ["validity"], fill=1.0)
+            extra("frame_truth_world_position.exr", ["X", "Y", "Z"])
+            extra("frame_truth_surface_temperature.exr", ["surface_temperature_K"], fill=300.0)
+            extra("frame_truth_instance_id.exr", ["instance_id"], dtype=np.uint32, fill=1)
+            extra("frame_truth_material_id.exr", ["instance_id"], dtype=np.uint32, fill=2)
+            if band != "vis":
+                extra("frame_tapp.exr", ["Channel_0"], fill=295.0,
+                      signal=_signal("apparent_temperature", "K", ["Channel_0"]))
+            for fname, body in (
+                ("frame_truth_instances.json", [{"instance_id": 1, "name": "obj"}]),
+                ("frame_truth_materials.json", [{"material_id": 2, "name": "mat"}]),
+            ):
+                (vdir / fname).write_text(json.dumps(body), encoding="utf-8", newline="\n")
+                extras[f"{rel}/{fname}"] = {"kind": fname.removeprefix("frame_").removesuffix(".json")}
+            (vdir / "frame.png").write_bytes(b"PNG")
+            extras[f"{rel}/frame.png"] = {"channel_names": ["R", "G", "B"], "channels": 3,
+                                          "height": h, "width": w}
+            record = f"{rel}/frame.metadata.json"
+            (vdir / "frame.metadata.json").write_text(json.dumps({"record_id": "f" * 64}),
+                                                      encoding="utf-8", newline="\n")
+            observations[band] = {"record": record, "record_sha256": "0" * 64,
+                                  "camera_to_world": list(IDENTITY16),
+                                  "spectral_mode": f"{band}_fused",
+                                  "products": products,
+                                  "extra_products": extras,
+                                  "pixel_qa": {}}
+        manifest = {"schema": "quantiloomfusion.sample", "schema_version": 1,
+                    "dataset_id": dataset_id, "sample_id": sid, "scene_id": "fixture",
+                    "split_group": "fixture-group", "state": "complete",
+                    "parameters": {"azimuth_deg": 0, "elevation_deg": 5,
+                                   "radius_scale": 1.0, "repeat": i},
+                    "rig_to_world": IDENTITY16,
+                    "registration": "unregistered", "geometry_ground_truth": True,
+                    "observations": observations}
+        sdir = root / "samples" / sid
+        jsonio.atomic_json(sdir / "sample.json", manifest)
+        entries.append({"sample_id": sid, "manifest": f"samples/{sid}/sample.json",
+                        "split_group": "fixture-group"})
+    jsonio.atomic_json(root / "dataset.index.json",
+                       {"schema": "quantiloomfusion.env_dataset", "schema_version": 1,
+                        "dataset_id": dataset_id, "complete_triplets": len(entries),
+                        "planned_triplets": len(entries), "samples": entries})
+    jsonio.atomic_json(root / "dataset.plan.json",
+                       {"schema": "quantiloomfusion.env_dataset", "schema_version": 1,
+                        "dataset_id": dataset_id, "name": "fixture",
+                        "recipe": {"cli_version": "Quantiloom 0.7.4"},
+                        "scenes": [{"id": "fixture", "split_group": "fixture-group"}],
+                        "geometry_ground_truth": True})
+    return root

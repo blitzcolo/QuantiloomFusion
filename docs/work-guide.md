@@ -88,7 +88,7 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 2. ~~**换行符风险**：`.gitattributes` 为空，而 Windows 侧 `core.autocrlf=true`。若由 Windows git 检出，源文件变成 CRLF，`generator_sha256` 随之改变，"同一数据集目录跨系统交替执行"失效。~~ 已由 `1fae36e`（`* text=auto eol=lf`）解决。
 3. **生成器指纹只覆盖单文件**：包化后必须改成覆盖 datagen 的导入闭包，否则拆出去的模块改了也不会触发拒绝续跑。
 4. **interop 下中断渲染**：WSL 下 `child.terminate()` 作用于 Linux 侧 interop 代理进程，Windows 侧 `Quantiloom.exe` 是否随之退出未验证（待核实）；`alive(child_pid)` 在 WSL 下检查的也是代理进程。
-5. 数据集文档与现状不符：测试数写作"10 项"（实为 11）；证据文件写作 `docs/env-dataset-generation-evidence-2026-10-06.json`（实际在 `build/`，被 gitignore）；使用示例目录为 `build/env-smoke`、`build/env-three-band`（现有为 `*-0.7.4`）；pilot 配置未被文档提及。
+5. ~~数据集文档与现状不符：测试数写作"10 项"（实为 11）；证据文件写作 `docs/env-dataset-generation-evidence-2026-10-06.json`（实际在 `build/`，被 gitignore）；使用示例目录为 `build/env-smoke`、`build/env-three-band`（现有为 `*-0.7.4`）；pilot 配置未被文档提及。~~ 已由 `61341e0`、`81d5286`、`f36ed47`、`0d29c43` 修正（T0.4）。
 6. `sample.json` 的 `extra_products` 以文件路径为键而非产品名，消费端只能按文件名反查产品名（可在 sample schema v2 中补 `truth` 映射，需单独决策）。另外 `frame_truth_material_id.exr` 的通道名是 `instance_id`（与实例 ID 文件同名），读取器必须按文件而不是按通道名区分两者（pilot 实测）。
 7. ~~`.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置，与本仓库无关。~~ 已加入 `.gitignore`（`460a57a`）。
 8. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
@@ -367,7 +367,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T0.1 | 完成 | `1fae36e`；WSL 与 Windows（`core.autocrlf=true`）git `status` 均干净 |
 | T0.2 | 完成 | `0c79007`：`/build`、`.venv*/`、`.pytest_cache/`；`460a57a`：`.clang-tidy`、`.clangd`；`assets/`、`paper/` 保持忽略 |
 | T0.3 | 完成 | 配置 `5622f5a` → 生成器与测试 `bad41d3`（对拍基线）→ 审计 `9d2c4b6` → 文档、README、`AGENTS.md`、本文、7 个 skill 各一个 commit；提交后两侧 unittest 均 `OK (skipped=2)` |
-| T0.4 | 未开始 | |
+| T0.4 | 完成 | 四处各一个 commit：测试数 11（`61341e0`）；证据文件与旧目录的实际位置（`81d5286`，旧 `*-ready` 目录在 `build/_archive-0.7.3-buggy/`）；示例目录改为 `*-0.7.4` 并说明命名与只能 verify 的现有目录（`f36ed47`）；pilot 配置说明（`0d29c43`，与正式配置的差异经 `tomllib` 逐键比对：仅名称、采样网格、`closure_audit_every=8`） |
 | T1.1–T1.5 | 未开始 | |
 | T2.1–T2.16 | 未开始 | 依赖 T0.3、T1.1 |
 | T3.1–T3.9 | 未开始 | |
@@ -409,5 +409,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：仓库基线已入库（T0.1–T0.3），`build/` 已迁到 H 盘并核对完整（§2.4）。skills 的内联脚本已自测：`dataset-inspect` 在 pilot 上跑通；`datagen-parity` 对同一生成器给出 `PARITY OK`、篡改后给出 `PARITY FAIL`（`build/_parity/selftest-20261011-200958`）；`commit` 的 message 自检能拦截里程碑、任务编号、进度、URL、`WIP`。
-- 下一步：T0.4（修正数据集文档与现状不符的几处，每处一个 commit），然后 T1.1（统一两侧 uv 版本，写 `pyproject.toml`）。
+- 当前停在：阶段 0 全部完成（T0.1–T0.4）；`build/` 已迁到 H 盘并核对完整（§2.4）。
+- 下一步：T1.1（统一两侧 uv 版本，写 `pyproject.toml`、`.python-version`、`uv.lock`，两侧分别 `uv sync` 并用 pytest 跑现有 11 项）。

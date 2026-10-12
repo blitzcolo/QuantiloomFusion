@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.exr binary
+*.png binary
+*.jpg binary
+*.glb binary
+*.bin binary
+*.qlbin binary
+*.safetensors binary
+*.pt binary
+*.npz binary
+*.npy binary
+*.pdf binary

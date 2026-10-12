@@ -88,11 +88,12 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 1. ~~**审计工具在 WSL 下不可用**：`_closure_audit.py`、`_spectral_integration_audit.py` 把模型包写成 `Path("H:/Quantiloom-dev/assets/atmos_models")`，Linux Python 下这是相对路径。生成器在 WSL 下运行时的周期性闭合审计因此必然报 "audit unavailable"。~~ 已修（T2.14）：闭合审计从 `capture.toml` 的 `atmosphere.model_pack` 取模型包，光谱积分审计默认值经 `native_path`。
 2. ~~**换行符风险**：`.gitattributes` 为空，而 Windows 侧 `core.autocrlf=true`。若由 Windows git 检出，源文件变成 CRLF，`generator_sha256` 随之改变，"同一数据集目录跨系统交替执行"失效。~~ 已由 `1fae36e`（`* text=auto eol=lf`）解决。
 3. **生成器指纹只覆盖单文件**：包化后必须改成覆盖 datagen 的导入闭包，否则拆出去的模块改了也不会触发拒绝续跑。
-4. **interop 下中断渲染**：WSL 下 `child.terminate()` 作用于 Linux 侧 interop 代理进程，Windows 侧 `Quantiloom.exe` 是否随之退出未验证（待核实）；`alive(child_pid)` 在 WSL 下检查的也是代理进程。
+4. ~~**interop 下中断渲染**：WSL 下 `child.terminate()` 作用于 Linux 侧 interop 代理进程，Windows 侧 `Quantiloom.exe` 是否随之退出未验证（待核实）；`alive(child_pid)` 在 WSL 下检查的也是代理进程。~~ 已实测（T2.16）：WSL 下真正的 Ctrl+C 后 Windows 侧 `Quantiloom.exe` ≤1 s 退出，两次一致，状态记为 `interrupted`，锁文件释放，续跑完成。
 5. ~~数据集文档与现状不符：测试数写作"10 项"（实为 11）；证据文件写作 `docs/env-dataset-generation-evidence-2026-10-06.json`（实际在 `build/`，被 gitignore）；使用示例目录为 `build/env-smoke`、`build/env-three-band`（现有为 `*-0.7.4`）；pilot 配置未被文档提及。~~ 已由 `61341e0`、`81d5286`、`f36ed47`、`0d29c43` 修正（T0.4）。
 6. `sample.json` 的 `extra_products` 以文件路径为键而非产品名，消费端只能按文件名反查产品名（可在 sample schema v2 中补 `truth` 映射，需单独决策）。另外 `frame_truth_material_id.exr` 的通道名是 `instance_id`（与实例 ID 文件同名），读取器必须按文件而不是按通道名区分两者（pilot 实测）。
 7. ~~`.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置，与本仓库无关。~~ 已加入 `.gitignore`（`460a57a`）。
-8. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
+8. ~~**跨系统重规划失败**（T2.15 发现，重构前就存在）：Windows 与 Linux libm 末位差异使正式配置 549 个任务 TOML 在另一系统上逐字节不同，`plan` 报 "planned file changed"，正式数据集无法跨系统续跑。~~ 已由 `aa07475` 修正：同 `dataset_id` 重规划时保留已存计划与任务文件，容差比对。
+9. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
 
 ---
 
@@ -378,10 +379,11 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T2.12 | 完成 | `b74fb8e`：`datagen/fingerprint.py`；闭包 24 个文件（13 个 datagen 模块 + 7 个 core 模块 + 4 个 `__init__`），`core/bands.py` 与消费端不在内。smoke 与正式配置对拍均 `PARITY OK`（`build/_parity/20261012-102129-fp-smoke`、`-102152-fp-formal`，后者 7785 个文件）；WSL 与 Windows 规划到同一目录时 `dataset.plan.json` 逐字节相同（`dataset_id` `b8da87a5…`，`build/_parity/20261012-102242-crossos2`）。两侧 67 passed / 2 skipped |
 | T2.13 | 完成 | `46d6d5a`（`plan`/`run_dataset` 可注入渲染器，CLI 不变，smoke 对拍 OK）、`da78a81`（`tests/fake_renderer.py` + `tests/test_datagen_run.py`：完整运行、续跑空操作、失败重试、keep-going、产品损坏修复、未发布 attempt 恢复、中断、采集预算，共 8 项）。两侧 75 passed / 2 skipped |
 | T2.14 | 完成 | `32a0a89`、`e3bfba9`：闭合审计与光谱积分审计改为经 `native_path` 取模型包。pilot `concrete_a007_e00_r00_n00/lwir/attempt-0001`：旧脚本在 WSL 下 `FileNotFoundError`（复现缺陷）；新旧脚本在 Windows 下输出逐字节相同；新脚本在 WSL 下与存档 `closure_audit.txt` 一致（`mean=-2.234 rms=6.384`）；经 `run_closure_audit` 调用同样得到 residual 行。光谱审计两侧输出一致 |
-| T2.15–T2.16 | 未开始 | |
+| T2.15 | 完成 | 用新包真实渲染 smoke（Quantiloom 0.7.4）：`build/env-smoke-20261012-103949`（一次跑完）与 `build/env-smoke-int2-20261012-104814`（中断后续跑，约 3 分 51 秒，`rendered=18 failed=0`，无 QA 警告）；两侧 `verify --inspect-exr` 均 `complete=6, partial=0, planned=6`；WSL 下 CLOSURE 行给出残差（grassland `mean=+0.089 rms=6.801`）；夜间 VIS rawdn 中位 0、月光 6.0，与 0.7.4 基线一致；带真实数据集两侧 `77 passed, 0 skipped`（当时计数）。正式配置跨系统规划：`dataset_id` 相同（`c2625af5…`），但 549 个任务 TOML 差 1 ULP → 发现并修正跨系统重规划缺陷（`aa07475`，两方向实测续跑不改文件，`build/_parity/20261012-110816-formal-replan-wsl2win`、`-111128-formal-replan-win2wsl`）。文档与 skills 同步（`be21fe3`…`399fd2f`） |
+| T2.16 | 完成 | WSL 下 Ctrl+C（PTY 前台）两次：`Quantiloom.exe` ≤1 s 退出，rc 130，状态 `interrupted`，锁释放；无需补 Windows 侧终止方案。注意后台 `&` 进程继承被忽略的 SIGINT，`kill -INT` 无效，不能用来模拟 |
 | T3.1–T3.9 | 未开始 | |
 | T4.1–T4.7 | 未开始 | |
-| T5.1–T5.4 | 未开始 | T5.1 依赖 T2.15 完成并冻结 |
+| T5.1–T5.4 | 未开始 | T5.1 的前置（T2.15）已满足，待用户决定采集规模后冻结 datagen 并开跑 |
 
 ## 7. 决策记录
 
@@ -403,6 +405,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | 拆包期间每步产出补丁、由 lead 逐个审阅后各自提交 | 一事一提交，同时每步都有对拍与双系统测试的证据 |
 | 2026-10-12 | 审计保留为 `tools/` 下的独立脚本，以子进程调用，不迁入 `datagen/audit/` | 子进程隔离 + 300 s 超时在 11 天长跑中更稳；审计在模块级依赖 numpy/OpenEXR/safetensors，放进 datagen 会破坏"仅标准库"约束；它们本就不进配方指纹 |
 | 2026-10-12 | `FakeRenderer` 放在 `tests/`，不进包 | 只给测试用；放进 datagen 会无谓地进入配方指纹 |
+| 2026-10-12 | 首次规划的系统冻结计划；跨系统重规划按 1e-12 容差比对，保留已存文件 | 两系统 libm 末位不同是平台事实，逐字节一致做不到；保留首次文件让 `job_sha256` 与磁盘一致 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
@@ -424,5 +427,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：T2.1–T2.14 完成：生成器已拆包、配方指纹覆盖导入闭包、无 GPU 的运行路径测试、审计在 WSL 下可用。
-- 下一步：T2.15 收尾验证（两侧全量对拍、用新包真实渲染 smoke 并 `verify --inspect-exr`、更新数据集文档的命令与指纹描述），T2.16 interop 中断验证（需要 GPU）。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：阶段 2 完成（T2.1–T2.16）。datagen 已拆包、指纹覆盖导入闭包、可跨系统续跑、审计在 WSL 下可用，并经真实 smoke 渲染验证。两侧 78 passed / 2 skipped。
+- 下一步：两条线可并行——(a) 用户决定正式采集规模（全量约 264 GPU 小时，或先跑子集），然后冻结 datagen（记录冻结 commit）开跑 T5.1；(b) 阶段 3 消费端：T3.1 `dataset.exr` → T3.2 schema → T3.3 reader → T3.4 合成夹具。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

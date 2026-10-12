@@ -99,6 +99,7 @@ class Product:
     name: str
     path: str  # relative to dataset root, POSIX separators
     signal: SignalSemantics | None = None  # None for truth/reference products
+    channels: tuple[str, ...] = ()  # channel names declared by the producer
 
 
 @dataclass(frozen=True)

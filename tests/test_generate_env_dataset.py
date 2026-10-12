@@ -6,6 +6,7 @@ Windows interpreter sees it; the dataset must have been rendered by the account
 running the tests (attempt files are owner-ACL'd by the renderer).
 """
 import copy
+import hashlib
 import json
 import math
 import os
@@ -95,6 +96,43 @@ class PlanningContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'planned file changed'):self.plan()
         self.settings['cameras']['lwir']['responsivity_dn_per_w']=1e12;self.save()
         with self.assertRaisesRegex(ValueError,'unknown cameras.lwir'):settings.read_settings(self.config)
+
+    def test_replan_keeps_stored_plan_across_ulp_differences(self):
+        # libm differs in the last ULP between OSes: the first planning host
+        # freezes the plan, and a tolerant re-plan leaves every byte alone.
+        self.plan();cam='lwir'
+        stored=jsonio.load_json(self.out/'dataset.plan.json');camera=stored['samples'][0]['cameras'][cam]
+        job=self.out/camera['job'];doc=tomllib.loads(job.read_text())
+        doc['camera']['position'][0]=math.nextafter(doc['camera']['position'][0],math.inf)
+        job.write_text(tomlio.toml_text(doc))
+        camera['job_sha256']=hashlib.sha256(job.read_bytes()).hexdigest()
+        camera['camera_to_world'][3]=doc['camera']['position'][0]
+        jsonio.atomic_json(self.out/'dataset.plan.json',stored)
+        before={p.relative_to(self.out):p.read_bytes() for p in self.out.rglob('*') if p.is_file()}
+        second=self.plan()
+        after={p.relative_to(self.out):p.read_bytes() for p in self.out.rglob('*') if p.is_file()}
+        self.assertEqual(after,before)
+        self.assertEqual(second['samples'][0]['cameras'][cam]['job_sha256'],camera['job_sha256'])
+
+    def test_replan_rejects_real_job_change(self):
+        self.plan();cam='vis'
+        stored=jsonio.load_json(self.out/'dataset.plan.json');camera=stored['samples'][0]['cameras'][cam]
+        job=self.out/camera['job'];doc=tomllib.loads(job.read_text())
+        doc['renderer']['spp']=doc['renderer'].get('spp',1)+1
+        job.write_text(tomlio.toml_text(doc))
+        camera['job_sha256']=hashlib.sha256(job.read_bytes()).hexdigest()
+        jsonio.atomic_json(self.out/'dataset.plan.json',stored)
+        with self.assertRaisesRegex(ValueError,'planned file changed'):self.plan()
+
+    def test_replan_rejects_unrecorded_job_edit(self):
+        # A within-tolerance edit still fails because the file no longer hashes
+        # to the plan's job_sha256.
+        self.plan();cam='mwir'
+        camera=jsonio.load_json(self.out/'dataset.plan.json')['samples'][0]['cameras'][cam]
+        job=self.out/camera['job'];doc=tomllib.loads(job.read_text())
+        doc['camera']['fov_y']=math.nextafter(doc['camera']['fov_y'],math.inf)
+        job.write_text(tomlio.toml_text(doc))
+        with self.assertRaisesRegex(ValueError,'planned file changed'):self.plan()
 
     def test_shader_change_accepted_within_same_cli_version(self):
         # Compiled blobs beside the binary are recorded in renderer_observed

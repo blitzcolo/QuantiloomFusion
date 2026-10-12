@@ -21,6 +21,29 @@ from .settings import positive, read_settings
 from .solar import solar_extension
 
 
+def _agrees(a,b,path=''):
+    # First differing key path, or None. Numbers compare with a tolerance that
+    # covers the last-ULP trig spread between Windows and Linux libm; keys
+    # named job_sha256 are skipped because they hash the job text, which
+    # legitimately differs at that scale.
+    if isinstance(a,dict) and isinstance(b,dict):
+        ka={k for k in a if k!='job_sha256'}
+        if ka!={k for k in b if k!='job_sha256'}:return path or '<root>'
+        for k in sorted(ka):
+            diff=_agrees(a[k],b[k],f'{path}.{k}' if path else k)
+            if diff:return diff
+        return None
+    if isinstance(a,list) and isinstance(b,list):
+        if len(a)!=len(b):return path
+        for i,(x,y) in enumerate(zip(a,b)):
+            diff=_agrees(x,y,f'{path}[{i}]')
+            if diff:return diff
+        return None
+    if isinstance(a,(int,float)) and isinstance(b,(int,float)) and not isinstance(a,bool) and not isinstance(b,bool):
+        return None if math.isclose(a,b,rel_tol=1e-12,abs_tol=1e-12) else path
+    return None if a==b else path
+
+
 def plan(config: Path,out: Path,renderer=None):
     settings=read_settings(config);d=settings["dataset"]
     qt=native_path(d["qt_root"]).resolve();cli=native_path(d["cli"]).resolve()
@@ -145,8 +168,28 @@ def plan(config: Path,out: Path,renderer=None):
             'registration':'unregistered_native_camera_grids','geometry_ground_truth':d['geometry_truth'],
             'fixed_camera_profiles':settings['cameras'],'parameters_vary':'scene, rig azimuth/elevation/radius, repeat; each parameter tuple includes all three bands'}
     destination=out/'dataset.plan.json'
-    if destination.exists() and load_json(destination)['dataset_id']!=identity:
+    stored=load_json(destination) if destination.exists() else None
+    if stored is not None and stored['dataset_id']!=identity:
         raise ValueError('existing dataset has a different recipe, source asset, CLI version or generator fingerprint; choose a new output directory')
+    if stored is not None:
+        # Trig results differ in the last ULP between Windows and Linux libm,
+        # so the first planning host freezes the plan: a tolerant re-plan keeps
+        # the stored job files and plan rather than churning their hashes.
+        # renderer_observed is recorded but not gated: compiled blobs churn.
+        diff=_agrees({k:v for k,v in stored.items() if k!='renderer_observed'},
+                     {k:v for k,v in result.items() if k!='renderer_observed'})
+        if diff:raise ValueError(f'planned file changed: {destination}: {diff}')
+        expected={c['job']:c['job_sha256'] for s in stored['samples'] for c in s['cameras'].values()}
+        for relative,text in {**derived,**texts}.items():
+            path=out/relative;path.parent.mkdir(parents=True,exist_ok=True)
+            if not path.exists():path.write_text(text,encoding='utf-8',newline='\n')
+            elif path.read_bytes()!=text.encode():
+                if relative in derived:raise ValueError(f'planned file changed: {path}')
+                diff=_agrees(tomllib.loads(path.read_text(encoding='utf-8')),tomllib.loads(text))
+                if diff:raise ValueError(f'planned file changed: {path}: {diff}')
+            if relative in expected and digest(path)!=expected[relative]:raise ValueError(f'planned file changed: {path}')
+        print(f'Planned {len(samples)} triplets / {len(samples)*3} camera captures in {out}',flush=True)
+        return stored
     for relative,text in {**derived,**texts}.items():
         path=out/relative;path.parent.mkdir(parents=True,exist_ok=True)
         if path.exists() and path.read_bytes()!=text.encode():raise ValueError(f'planned file changed: {path}')

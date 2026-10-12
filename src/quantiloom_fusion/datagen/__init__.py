@@ -1,0 +1,1 @@
+"""Dataset generation: config validation, scene assembly, sensor configs, solar spectrum derivation, planning, renderer adapter, export-record validation, run/publish/index, audits, and the CLI. Depends on core only; standard library only at module level (pixel QA and audits import numpy/OpenEXR lazily inside functions)."""

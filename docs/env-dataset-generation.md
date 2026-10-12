@@ -165,7 +165,7 @@ smoke 实测（64×36，0.7.4）：月光 VIS rawdn **中位 6.0 DN**（白天�
 
 ## 使用方法
 
-在 `D:/QuantiloomFusion`（Windows）或 `/mnt/d/QuantiloomFusion`（WSL）目录运行。命令在两系统下相同：
+在 `D:/QuantiloomFusion`（Windows）或 `/mnt/d/QuantiloomFusion`（WSL）目录运行。命令在两系统下相同。输出目录以渲染器版本为后缀（如 `build/env-smoke-0.7.4`）；改了相机配置、配方开关或渲染器版本就换一个新目录，旧目录只 `verify`。本机现有的 `build/env-smoke-0.7.4`、`build/env-pilot-0.7.4` 已完整渲染，且规划于 `build/` 迁到 H 盘之前，只能 `verify`，重新试跑请用新目录名：
 
 ```powershell
 python -m pip install numpy OpenEXR
@@ -176,7 +176,7 @@ python -m pip install numpy OpenEXR
 ```powershell
 python tools/generate_env_dataset.py plan `
   --config configs/env_dataset.toml `
-  --out build/env-three-band
+  --out build/env-three-band-0.7.4
 ```
 
 小样本试跑生成六个场景条目各一组 VIS／MWIR／LWIR（含一个夜间变体和一个低照度变体）：
@@ -184,7 +184,7 @@ python tools/generate_env_dataset.py plan `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset_smoke.toml `
-  --out build/env-smoke
+  --out build/env-smoke-0.7.4
 ```
 
 正式运行及断点续生使用同一条命令：
@@ -192,7 +192,7 @@ python tools/generate_env_dataset.py run `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset.toml `
-  --out build/env-three-band
+  --out build/env-three-band-0.7.4
 ```
 
 限制本次新增采集数、仅选择场景，或失败后继续其他采集：
@@ -200,7 +200,7 @@ python tools/generate_env_dataset.py run `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset.toml `
-  --out build/env-three-band `
+  --out build/env-three-band-0.7.4 `
   --scene concrete --scene seaside `
   --max-captures 6 --keep-going
 ```
@@ -211,7 +211,7 @@ python tools/generate_env_dataset.py run `
 
 ```powershell
 python tools/generate_env_dataset.py verify `
-  --out build/env-three-band --inspect-exr
+  --out build/env-three-band-0.7.4 --inspect-exr
 ```
 
 不加 `--inspect-exr` 时，仍检查文件哈希、输出完整性和实际相机参数；加上后进一步检查 EXR 尺寸、通道、有限像素及内嵌事务标识。`verify` 只对目录中已存在的样本做一致性校验：**没有渲染的计划目录也能通过验证**（输出 `complete=0`）。判断数据集是否完成须看输出的 `complete` 是否等于 `planned`，或以 `dataset.index.json` 为准。
@@ -341,13 +341,13 @@ python -m unittest discover -s tests -v
 设置 `QUANTILOOM_TEST_DATASET` 后，会进一步使用真实导出测试发布恢复、产品损坏检测、位姿和 FOV 拒绝路径。两点要求：该数据集必须由**运行测试的那个 Windows 账户**渲染（渲染器给 `attempts/` 文件设置仅创建者访问的 ACL，别人渲染的目录会在恢复测试里报 PermissionError）；从 WSL 调 Windows Python 时要经 `WSLENV` 传变量，否则变量到不了 Windows 侧、测试被静默跳过：
 
 ```powershell
-$env:QUANTILOOM_TEST_DATASET = "D:/QuantiloomFusion/build/env-smoke"
+$env:QUANTILOOM_TEST_DATASET = "D:/QuantiloomFusion/build/env-smoke-0.7.4"
 python -m unittest discover -s tests -v
 ```
 
 ```bash
 WSLENV=QUANTILOOM_TEST_DATASET/p \
-QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke \
+QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.7.4 \
 <windows-python> -m unittest discover -s tests -v
 ```
 

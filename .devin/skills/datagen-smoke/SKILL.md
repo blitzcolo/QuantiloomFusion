@@ -40,7 +40,9 @@ python3 tools/generate_env_dataset.py verify --out "$OUT" --inspect-exr
 
 1. `run` 退出码 0，输出中没有 `FAILED`；`QA warning`（RAW 饱和比例 > 5%）要记录。
 2. `verify` 输出 `Verified: complete=6, partial=0, planned=6`。
-3. 每 3 个完整三元组会打印一行 `CLOSURE ...`。在审计工具迁移完成之前，WSL 下显示 `audit unavailable` 是已知问题（模型包路径写成了 `H:/` 字面量），不算本次失败；迁移完成后它必须给出残差行。
+3. 每 3 个完整三元组会打印一行 `CLOSURE ...`，两侧都必须给出 `closure residual` 残差行；出现 `audit unavailable` 算失败（审计依赖 numpy + OpenEXR，确认运行生成器的解释器装了它们）。
+5. 要中断测试请用真正的 Ctrl+C（前台、带 PTY）。后台 `&` 启动的进程会继承被忽略的 SIGINT，`kill -INT` 对它无效。
+6. 被中断后续跑的目录不要拿来做 `QUANTILOOM_TEST_DATASET`：其中 `attempt-0001` 是中断留下的残骸，导出恢复类测试会失败。用一次跑完的目录。
 4. 抽查一个样本：用 `dataset-inspect` 看各波段产品统计；`samples/<id>/<band>/vNNNN/frame.png` 可直接用 read 工具看（那是理想针孔主渲染，不是相机产品）。夜间样本 VIS rawdn 中位应接近 0，月光样本 VIS rawdn 中位为个位数 DN（0.7.4 smoke 实测 6.0）。
 
 ## 汇报

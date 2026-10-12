@@ -34,8 +34,11 @@ from contextlib import contextmanager
 from itertools import product
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from quantiloom_fusion.core.hashing import digest, fingerprint
 from quantiloom_fusion.core.host import POSIX
+from quantiloom_fusion.core.jsonio import atomic_json, load_json
 from quantiloom_fusion.core.paths import canonical_path, is_drive_path, native_path
+from quantiloom_fusion.core.tomlio import scalar, toml_text
 
 SCHEMA = "quantiloomfusion.env_dataset"
 VERSION = 1
@@ -44,79 +47,6 @@ MODES = {"vis": "vis_hero", "mwir": "mwir_fused", "lwir": "lwir_fused"}
 PATH_KEYS = {"gltf", "usd", "file", "basis_file", "materials_json", "solar_lut",
              "forcing_file", "model_pack", "environment_map", "temperature_texture",
              "known_psf_path", "emissive_curve", "spectral_weight_texture"}
-
-
-def digest(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def fingerprint(obj) -> str:
-    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
-
-
-def atomic_json(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    with temp.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(value, f, indent=2, ensure_ascii=False, allow_nan=False)
-        f.write("\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temp, path)
-
-
-def load_json(path: Path):
-    def unique(items):
-        result = {}
-        for k, v in items:
-            if k in result:
-                raise ValueError(f"duplicate JSON key: {k}")
-            result[k] = v
-        return result
-    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
-
-
-def scalar(value):
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (float, int)):
-        if not math.isfinite(value):
-            raise ValueError("nonfinite TOML value")
-        return repr(value)
-    if isinstance(value, list):
-        return "[" + ", ".join(scalar(v) for v in value) + "]"
-    raise ValueError(f"unsupported TOML value: {value!r}")
-
-
-def toml_text(doc: dict) -> str:
-    lines = []
-    def emit(table, keys, array=False):
-        if keys:
-            path = ".".join(json.dumps(k) for k in keys)
-            lines.append(("[[" if array else "[") + path + ("]]" if array else "]"))
-        for k, v in table.items():
-            if not isinstance(v, dict) and not (isinstance(v, list) and v and isinstance(v[0], dict)):
-                lines.append(json.dumps(k) + " = " + scalar(v))
-        lines.append("")
-        for k, v in table.items():
-            if isinstance(v, dict):
-                emit(v, keys + [k])
-            elif isinstance(v, list) and v and isinstance(v[0], dict):
-                for entry in v:
-                    emit(entry, keys + [k], True)
-    emit(doc, [])
-    text = "\n".join(lines)
-    # A serializer mistake must fail before a rendering task is dispatched.
-    if tomllib.loads(text) != doc:
-        raise ValueError("TOML round-trip mismatch")
-    return text
 
 
 def check_keys(table, allowed, name):

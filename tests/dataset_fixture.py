@@ -50,9 +50,10 @@ def _camera_config_toml(band: str) -> str:
     })
 
 
-def _signal(kind: str, unit: str, channels: list, cfa: str = "0") -> dict:
-    return {"kind": kind, "unit": unit, "transfer": "linear", "camera_cfa": cfa,
-            "channels": channels, "colour_space": "device_native", "storage": "float32"}
+def _signal(kind: str, unit: str, channels: list, cfa: str = "0", transfer: str = "linear",
+            colour_space: str = "device_native") -> dict:
+    return {"kind": kind, "unit": unit, "transfer": transfer, "camera_cfa": cfa,
+            "channels": channels, "colour_space": colour_space, "storage": "float32"}
 
 
 def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None) -> Path:
@@ -81,17 +82,34 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None) -> Pat
                 exr.write_image(vdir / name, a)
 
             products = {}
-            for name, fname, unit in (
-                ("measurement", "frame_measurement.exr", "W/m^2/sr"),
-                ("rawdn", "frame_rawdn.exr", "dn"),
-                ("corrected", "frame_corrected.exr", "W/m^2/sr"),
-                ("display", "frame_display.exr", "1"),
-            ):
-                write(fname, ["Y"])
+            cfa = "1" if band == "vis" else "0"
+            signals = {
+                "measurement": ("band_measurement", "e-/s", "linear", ["Measurement"], "device_native"),
+                "rawdn": ("raw_dn", "DN", "linear", ["Raw"], "device_native"),
+                "corrected": ("device_linear", "e-", "linear", ["Signal"], "device_native"),
+                "display": ("display_srgb", "encoded sRGB", "sRGB", ["R", "G", "B"], "sRGB"),
+            }
+            config = _camera_config_toml(band)
+            for name, (kind, unit, transfer, chans, cs) in signals.items():
+                fname = f"frame_{name}.exr"
+                if name == "display":
+                    exr.write_image(vdir / fname, {c: np.full((h, w), v, np.float32)
+                                                   for c, v in zip(chans, (0.2, 0.4, 0.6))})
+                elif name == "rawdn" and band == "vis":
+                    raw = np.zeros((h, w), np.float32)  # constant-colour RGGB mosaic
+                    raw[0::2, 0::2], raw[0::2, 1::2] = 400.0, 600.0
+                    raw[1::2, 0::2], raw[1::2, 1::2] = 600.0, 300.0
+                    exr.write_image(vdir / fname, {"Raw": raw})
+                elif name == "corrected":
+                    ramp = np.repeat(np.linspace(0.0, 100.0, w, dtype=np.float32)[None, :], h, 0)
+                    exr.write_image(vdir / fname, {chans[0]: ramp})
+                else:
+                    exr.write_image(vdir / fname, {c: np.full((h, w), 1.0, np.float32)
+                                                   for c in chans})
                 products[name] = {"path": f"{rel}/{fname}",
-                                  "signal": _signal(name, unit, ["Y"]),
+                                  "signal": _signal(kind, unit, chans, cfa, transfer, cs),
                                   "provenance": {"geometry": geom,
-                                                 "camera_config_toml": _camera_config_toml(band)},
+                                                 "camera_config_toml": config},
                                   "image_metadata": {}}
             write("frame.exr", ["R", "G", "B", "A"])
             products["rendered_reference"] = {"path": f"{rel}/frame.exr",

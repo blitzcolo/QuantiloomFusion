@@ -5,11 +5,12 @@ from quantiloom_fusion.signal import Normalizer
 
 class DummyNormalizer:
     name = "dummy"
+    product = "rawdn"
 
     def params(self) -> dict:
         return {"scale": 1.0}
 
-    def __call__(self, image, semantics):
+    def __call__(self, image, observation):
         return image
 
 

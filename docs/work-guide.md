@@ -179,11 +179,12 @@ def verify_capture(record_path: Path, camera: dict, inspect_pixels: bool = False
 ```python
 class Normalizer(Protocol):
     name: str
-    def params(self) -> dict: ...                              # 写入结果，参与方法指纹
-    def __call__(self, image: np.ndarray, semantics: SignalSemantics) -> np.ndarray: ...  # float32
+    product: str                            # 消费的产品："display" / "rawdn" / "corrected" / "tapp"
+    def params(self) -> dict: ...           # 上一次调用实际应用的参数，写入结果
+    def __call__(self, image: np.ndarray, observation: Observation) -> np.ndarray: ...  # float32
 ```
 
-`measurement`/`rawdn`/`corrected` 量纲不同；红外 `display` 含场景相关拉伸，不当线性测量用。归一化策略必须显式选择并记录。
+`measurement`/`rawdn`/`corrected` 量纲不同；红外 `display` 含场景相关拉伸，不当线性测量用。归一化策略必须显式选择并记录。已有实现：`VisDisplay`（VIS `display`，sRGB 编码原样保留）、`VisRawLinear`（VIS `rawdn`：黑电平 → rggb 去马赛克 → 白平衡 + `device_to_linear_srgb` → adc 固定尺度或百分位尺度，输出线性 RGB）、`IrLinear`（IR `corrected`：每图百分位或固定窗）、`IrTemperature`（IR `tapp`：K 温窗）。`normalized_input(dataset, observation, normalizer)` 负责取产品并调用。VIS 输入可在 `display` 与线性 RAW 之间切换（用户决策）；颜色约定为 BT.601 full-range YCbCr（Y∈[0,1]，Cb/Cr 以 0.5 为中心）：融合只融 Y，彩色输出 = 融合 Y + VIS 的 CbCr。
 
 **B5 几何**（`geometry/`；坐标约定：像素索引，像素中心为整数，见 T3.6）
 

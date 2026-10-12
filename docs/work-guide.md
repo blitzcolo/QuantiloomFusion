@@ -374,7 +374,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T1.3 | 完成 | `d78efb5`：`tests/test_boundaries.py`，`check_tree()` + 真实包检查 + 每条规则的反例测试；故意在 `fusion/__init__.py` 加 `import quantiloom_fusion.datagen` 时报 `fusion/__init__.py:2: fusion must not import quantiloom_fusion.datagen`。两侧 `uv run pytest -q` 均 `20 passed, 2 skipped` |
 | T1.4 | 完成 | 每个边界一个 commit：`a00edc0` `core.bands.Band`（StrEnum，与生成器 `BANDS` 逐值相同）→ `6307aeb` `dataset.types` → `039a772` geometry → `42ab89c` signal → `bef38e0` registration → `916f1cf` fusion（含已实现的注册表与 `check_input`）→ `1f91daf` evaluation。两侧 `uv run pytest -q` 均 `60 passed, 2 skipped`；导入全部消费端子包后 `torch` 不在 `sys.modules` |
 | T1.5 | 完成 | `1ae708b`；`AGENTS.md` 同步（`266a9df`） |
-| T2.1–T2.16 | 未开始 | 依赖 T0.3、T1.1 |
+| T2.1–T2.11 | 完成 | 17 个 commit（`1dbe826`…`eb94380`）：core（paths、hashing/jsonio/tomlio、locking、vec）→ datagen（constants、settings、scene、solar、sensor、renderer、export_record、planner、publish、index、runner+verify、cli）；`tools/generate_env_dataset.py` 现为 11 行薄壳。**每一步**都在 smoke 配置上 `PARITY OK`（目录 `build/_parity/20261012-0947*`…`-101558-17-cli`），两侧 pytest 通过，两个裸解释器 `--help` 输出一致。AST 逐函数比对：原 43 个函数中 40 个逐字节相同，只有 `plan`（`is_drive_path`、`QuantiloomCli.version()`）、`run_dataset`（`is_drive_path`、`renderer.start`、`RenderProcess.terminate`、`run_closure_audit`、审计脚本路径改为从仓库根定位）、`main`（`CalledProcessError` 来自 renderer）有意改动。`RenderProcess.terminate` 在两侧用真实子进程验证过。测试改为直接导入包（61 passed / 2 skipped）。顺带：`test_boundaries` 放宽为 datagen 函数内可惰性导入 OpenEXR（`24915e5`，与 AGENTS.md 原有约定一致） |
+| T2.12–T2.16 | 未开始 | |
 | T3.1–T3.9 | 未开始 | |
 | T4.1–T4.7 | 未开始 | |
 | T5.1–T5.4 | 未开始 | T5.1 依赖 T2.15 完成并冻结 |
@@ -395,6 +396,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | `.clang-tidy`、`.clangd` 加入 `.gitignore` | 用户确认；属于 Quantiloom C++ 仓库，与本仓库无关 |
 | 2026-10-12 | `assets/`、`paper/` 保持被 gitignore | 用户确认 |
 | 2026-10-12 | 两侧 uv 统一到 0.12.10；WSL 另装独立版到 `~/.local/bin`，不动 conda base | Windows 已是 0.12.10；新版写的 lock 旧版不一定能读 |
+| 2026-10-12 | datagen 中的 `BANDS` 仍是普通字符串元组，不改用 `core.bands.Band` | 零风险保持任务 TOML 与指纹逐字节不变；类型化的 `Band` 只给消费端用 |
+| 2026-10-12 | 拆包期间每步产出补丁、由 lead 逐个审阅后各自提交 | 一事一提交，同时每步都有对拍与双系统测试的证据 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
@@ -416,5 +419,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 1 完成（T1.1–T1.5）：uv 项目、包骨架、AST 边界测试、§3.3 全部接口形状（两侧 60 passed / 2 skipped）。
-- 下一步：阶段 2 datagen 包化，从 T2.1（`core.host` + `core.paths`）开始；每个纯重构 commit 后跑 `datagen-parity`（smoke 配置）与 `cross-os-test`。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：T2.1–T2.11 完成，生成器已全部进入 `quantiloom_fusion.datagen`；临时状态：`recipe.generator_sha256` 只哈希 `datagen/planner.py`（T2.12 修正前不要用新代码规划任何要长期保留的数据集）。
+- 下一步：T2.12 配方指纹改为 datagen 导入闭包（§3.4），然后 T2.13 `FakeRenderer`、T2.14 审计迁入、T2.15 收尾验证。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

@@ -21,7 +21,7 @@ from .settings import positive, read_settings
 from .solar import solar_extension
 
 
-def plan(config: Path,out: Path):
+def plan(config: Path,out: Path,renderer=None):
     settings=read_settings(config);d=settings["dataset"]
     qt=native_path(d["qt_root"]).resolve();cli=native_path(d["cli"]).resolve()
     if not cli.is_file():raise FileNotFoundError(f"CLI not found: {cli}")
@@ -134,7 +134,7 @@ def plan(config: Path,out: Path):
         unreachable=[e['path'] for e in closure if not is_drive_path(e['path'])]
         if unreachable:
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
-    version=QuantiloomCli(cli).version()
+    version=(renderer or QuantiloomCli(cli)).version()
     files=generator_files()
     recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':generator_fingerprint(files),'generator_files':files,
             'physics_sources':physics_sources,

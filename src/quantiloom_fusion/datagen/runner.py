@@ -15,13 +15,13 @@ from .publish import publish, receipt_path, valid_receipt
 from .renderer import QuantiloomCli, run_closure_audit
 
 
-def run_dataset(out,plan,args,lease,lock):
+def run_dataset(out,plan,args,lease,lock,renderer=None):
     pixels=plan['recipe']['settings']['dataset']['verification']=='pixels'
     if pixels:
         try:import OpenEXR,numpy
         except ImportError as e:raise ValueError('pixel verification requires OpenEXR and numpy; install them or choose verification="hashes"') from e
     cli=native_path(plan['recipe']['settings']['dataset']['cli']).resolve()
-    renderer=QuantiloomCli(cli)
+    renderer=renderer or QuantiloomCli(cli)
     if POSIX and not is_drive_path(canonical_path(out)):
         raise ValueError('output directory must be reachable by the Windows CLI; '
                          'on WSL use a path under /mnt/<drive>/')

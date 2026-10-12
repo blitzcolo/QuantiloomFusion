@@ -8,6 +8,8 @@ Desktop.ini
 .idea/
 .kilo
 .codex
+.clang-tidy
+.clangd
 *.swp
 *.swo
 

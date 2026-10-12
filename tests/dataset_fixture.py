@@ -40,8 +40,12 @@ def _signal(kind: str, unit: str, channels: list, cfa: str = "0") -> dict:
             "channels": channels, "colour_space": "device_native", "storage": "float32"}
 
 
-def build_fixture(root: Path, samples: int = 2, size=(8, 6)) -> Path:
-    """Write a tiny dataset under root and return its path."""
+def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None) -> Path:
+    """Write a tiny dataset under root and return its path.
+
+    groups, if given, cycles sample split_groups (e.g. ["g0", "g1"] puts even
+    samples in g0, odd in g1); default is one shared "fixture-group".
+    """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     dataset_id = "fixture-dataset-id"
@@ -49,6 +53,7 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6)) -> Path:
     entries = []
     for i in range(samples):
         sid = f"fixture_s{i:02d}"
+        group = groups[i % len(groups)] if groups else "fixture-group"
         observations = {}
         for band, (w, h) in sizes.items():
             vdir = root / "samples" / sid / band / "v0001"
@@ -113,7 +118,7 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6)) -> Path:
                                   "pixel_qa": {}}
         manifest = {"schema": "quantiloomfusion.sample", "schema_version": 1,
                     "dataset_id": dataset_id, "sample_id": sid, "scene_id": "fixture",
-                    "split_group": "fixture-group", "state": "complete",
+                    "split_group": group, "state": "complete",
                     "parameters": {"azimuth_deg": 0, "elevation_deg": 5,
                                    "radius_scale": 1.0, "repeat": i},
                     "rig_to_world": IDENTITY16,
@@ -122,7 +127,7 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6)) -> Path:
         sdir = root / "samples" / sid
         jsonio.atomic_json(sdir / "sample.json", manifest)
         entries.append({"sample_id": sid, "manifest": f"samples/{sid}/sample.json",
-                        "split_group": "fixture-group"})
+                        "split_group": group})
     jsonio.atomic_json(root / "dataset.index.json",
                        {"schema": "quantiloomfusion.env_dataset", "schema_version": 1,
                         "dataset_id": dataset_id, "complete_triplets": len(entries),

@@ -9,6 +9,7 @@ from .schema import (
     parse_sample,
     product_name,
 )
+from .splits import leave_one_group_out
 from .types import (
     CameraGeometry,
     Condition,

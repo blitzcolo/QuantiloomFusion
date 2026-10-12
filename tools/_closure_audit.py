@@ -14,6 +14,9 @@ the 8-12 um endpoint collapse was.
 Usage:
     python _closure_audit.py <attempt_dir>
 
+The atmosphere model pack directory comes from the capture itself
+(capture.toml's atmosphere.model_pack), so this runs on Windows and WSL.
+
 attempt_dir contains frame_corrected.exr, frame_tapp.exr,
 frame_truth_surface_temperature.exr, frame_truth_validity.exr,
 frame_truth_material_id.exr, frame_truth_materials.json,
@@ -30,7 +33,8 @@ import numpy as np
 import OpenEXR
 import tomllib
 
-MODELS = Path("H:/Quantiloom-dev/assets/atmos_models")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from quantiloom_fusion.core.paths import native_path  # noqa: E402
 
 # --- Planck, W m^-2 sr^-1 nm^-1 ---------------------------------------------
 C1 = 1.191042972e-16  # 2 h c^2, W m^2 sr^-1
@@ -191,6 +195,9 @@ def fill_row(net, weather, sun_zen_deg, rel_az_deg, h1_km, view_zen_deg, range_k
 def main():
     attempt = Path(sys.argv[1])
     cfg = tomllib.loads((attempt / "capture.toml").read_text())
+    if "model_pack" not in cfg["atmosphere"]:
+        sys.exit("capture.toml has no atmosphere.model_pack")
+    models = native_path(cfg["atmosphere"]["model_pack"])
     atmos = cfg["atmosphere"]
     weather = dict(
         atmos_model=float(atmos.get("atmos_model", 2.0)),
@@ -219,7 +226,7 @@ def main():
     lam_grid = np.array([8000.0, 9000.0, 10000.0, 11000.0, 12000.0])
     lam_w = np.array([0.5, 1.0, 1.0, 1.0, 0.5]) * 1000.0 / 4000.0  # trapezoid
 
-    nets = {c: Net(MODELS / f"lwir_ground_{c}.safetensors")
+    nets = {c: Net(models / f"lwir_ground_{c}.safetensors")
             for c in ("tau", "lpath", "ldown")}
     thermal_band = True  # lwir
 

@@ -185,7 +185,7 @@ class Normalizer(Protocol):
 
 `measurement`/`rawdn`/`corrected` 量纲不同；红外 `display` 含场景相关拉伸，不当线性测量用。归一化策略必须显式选择并记录。
 
-**B5 几何**（`geometry/`）
+**B5 几何**（`geometry/`；坐标约定：像素索引，像素中心为整数，见 T3.6）
 
 ```python
 class BrownConradyCamera:
@@ -396,7 +396,10 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T3.2 | 完成 | `edf9683`（`Product.channels`）、`937f670` `dataset/schema.py`：严格解析 index/plan 子集/sample；产品名由文件名推导（`frame_<x>.exr/json`→`<x>`，`frame.exr`→`rendered_reference`，`frame.png`→`preview`，其他报错）；四个传感器产品的 geometry 必须一致；用 FakeRenderer 产出的 sample.json 做生产端/消费端交叉检查 |
 | T3.3 | 完成 | `3e593ab` `ThreeBandDataset`。pilot 24 个样本两侧全部解析；样本 0 每波段 13 个 EXR 产品可读（VIS 640×360、MWIR 320×256、LWIR 256×192），实例 ID 与材质 ID 文件同名通道 `instance_id` 但按文件区分正确。工况推导仍按 `scene_id` 后缀（`condition_of`） |
 | T3.4 | 完成 | `6410cc6` `tests/dataset_fixture.py`：各波段分辨率不同的微型数据集。两侧 90 passed / 5 skipped |
-| T3.5–T3.8 | 未开始 | |
+| T3.5 | 完成 | `f1c0978` `leave_one_group_out`（只读 index）；pilot 24 个样本同属一个 split_group（concrete 的 glTF），白天/夜间/月光不会跨折泄漏 |
+| T3.6 | 完成 | `07a00c5`。约定实测（pilot 全部 72 次采集，`build/_geom/probe_projection.py`）：相机系 = `world_to_camera`，Z 即 `truth_camera_z`（差 ≤ 2.3e-5）；投影为 OpenCV 形式的正向 Brown–Conrady，连续坐标左上像素中心在 (0.5, 0.5)，自投影误差 ≤ 0.001 px。包内 API 一律用像素索引坐标（中心为整数）。测试阈值 0.005 px / 1e-4（约 5 倍余量） |
+| T3.7 | 完成 | `0ffed23`。判据：4 个双线性源邻居 validity 全为 1；双线性采样的源 `truth_world_position` 与参考点距离 ≤ `pos_rel_tol`·深度（替代 z 测试，同时用到两台相机各自的真值）；边缘带用世界坐标二阶差分（相邻深度跳变判据在掠射地面上误标 54% 的 LWIR 像素，已弃用）。默认 `edge_px=1, edge_rel_tol=0.02, pos_rel_tol=0.005`。pilot 24 样本：VIS→LWIR 有效 58%（其余主要在 LWIR 视场外），LWIR→VIS 91%，VIS→MWIR 46%，MWIR→LWIR 86%；线性重采样位置残差中位 1e-5～2e-5 深度。参数扫描与判据可视化见 `build/_geom/measure_warp.py`、`criterion-vis-to-lwir.png` |
+| T3.8 | 未开始 | |
 | T3.9 | 进行中 | 首个数据点：pilot 全部 72 个 rawdn（24 样本 × 3 波段）读取，WSL 0.85 s（11.8 ms/个）vs Windows 0.10 s（1.4 ms/个），经 9p 读 H 盘约慢 8 倍（`build/_refactor/pilot_reader_check.py`，热缓存，待用更大读量与冷缓存复测） |
 | T4.1–T4.7 | 未开始 | |
 | T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
@@ -445,5 +448,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 2 完成；阶段 3 的 T3.1–T3.4 完成（EXR IO、严格 schema、`ThreeBandDataset`、合成夹具）。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`；中断后用同一条 run 命令续跑（任一系统均可）。
-- 下一步：T3.6 相机模型（先在 pilot 上实测投影约定与残差，再定阈值）→ T3.7 oracle 重投影 → T3.5 分折；子集跑完后 `verify --inspect-exr` 并汇总 CLOSURE 行与实测吞吐。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：阶段 3 的 T3.1–T3.7 完成（读取、分折、相机模型、oracle 重投影）。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
+- 下一步：阶段 4：T4.2 配准（`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`）、T4.1 归一化（VIS 用 display 还是 RAW 待决）、T4.3/T4.4 从 paper-exp 移植基线与指标；子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。T3.8（torch 适配）与 T3.9（IO 吞吐）在训练前再做。

@@ -8,7 +8,7 @@
 2. 一个任务可以对应多个 commit，但每个 commit 只干一件事；任务编号（`T2.4` 等）只在本文出现，**不要写进 commit message**。
 3. 完成后更新「进度表」「决策记录」「交接备忘」（`progress-update` skill）。
 
-最后更新：2026-10-11
+最后更新：2026-10-12
 
 ---
 
@@ -50,11 +50,11 @@
 | pilot 数据集 | `build/env-pilot-0.7.4`：24/24 完整（concrete 白天/夜间/月光 × 8 方位），samples 304 MB + attempts 624 MB | 同上 |
 | 场景资产 | `H:/Quantiloom-Qt/assets/configs/env_{concrete,desert,grassland,seaside}.toml` | 文件 |
 | `src/`、`paper/`、`assets/` | 空目录 | `ls` |
-| git | 仓库已初始化，**尚无任何 commit**，全部文件未跟踪 | `git status` |
+| git | 仓库基线已入库（2026-10-12）；索引与工作树全部为 LF；只剩 `.clang-tidy`、`.clangd` 未跟踪（待决） | `git log`、`git ls-files --eol`，WSL 与 Windows git `status` 一致 |
 
 ### 2.2 实测吞吐（决定正式采集的排期）
 
-pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**；样本约 33 GB，attempts 约 67 GB（D: 盘剩余 496 GB）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。
+pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**；样本约 33 GB，attempts 约 67 GB（`build/` 在 H 盘，剩余约 1.1 TB，见 §2.4）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。
 
 ### 2.3 环境
 
@@ -78,7 +78,7 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 
 - 生成器对 `--out` 做 `resolve()`：WSL 得到 `/mnt/h/<目标>/...`，Windows 得到 `H:\<目标>\...`，`canonical_path` 两侧都是 `H:/<目标>/...`——计划与任务 TOML 记录的是 **junction 的目标**，两侧一致，跨系统交替执行不受影响。
 - 单写者锁（WSL `flock` / Windows `msvcrt`）、`atomic_json`、同目录 `os.replace` 两侧都正常。
-- WSL git 把 junction 看成符号链接，`.gitignore` 的 `build/` 不再生效，需改为 `/build`（T0.2）。搬迁后真实仓库复现了 `?? build`，已在工作区把该行改为 `/build`（未提交）。
+- WSL git 把 junction 看成符号链接，`.gitignore` 的 `build/` 不再生效，需改为 `/build`（T0.2）。搬迁后真实仓库复现了 `?? build`，已改为 `/build`（`0c79007`）。
 
 约束：junction 要在正式采集规划前建好，之后不要改指向（等同于搬迁数据集，`run` 会拒绝，`verify` 不受影响）；只在 `build/` 这一层做链接，不在数据集目录内部再套链接；`build/` 下现有目录（pilot、smoke、0.7.3 归档，共 1.9 GB）规划时记录的是 `D:/QuantiloomFusion/build/...`，搬迁后只能 `verify`，不能续跑（它们都已完成）。训练/评价从机械盘随机读大量 EXR 可能受 IO 限制，见 T3.9。
 
@@ -363,8 +363,11 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 | 任务 | 状态 | 备注 |
 | --- | --- | --- |
-| 调研与本文、`AGENTS.md`、skills 初稿 | 完成 | 2026-10-11，未提交 |
-| T0.1–T0.4 | 未开始 | |
+| 调研与本文、`AGENTS.md`、skills 初稿 | 完成 | 已入库（`0b225f4`、`abfa13c`、`1c2e5ee`…`9e8ad20`） |
+| T0.1 | 完成 | `1fae36e`；WSL 与 Windows（`core.autocrlf=true`）git `status` 均干净 |
+| T0.2 | 完成（一项待决） | `0c79007`：`/build`、`.venv*/`、`.pytest_cache/`；`assets/`、`paper/` 是否该忽略仍待用户确认 |
+| T0.3 | 完成 | 配置 `5622f5a` → 生成器与测试 `bad41d3`（对拍基线）→ 审计 `9d2c4b6` → 文档、README、`AGENTS.md`、本文、7 个 skill 各一个 commit；提交后两侧 unittest 均 `OK (skipped=2)` |
+| T0.4 | 未开始 | |
 | T1.1–T1.5 | 未开始 | |
 | T2.1–T2.16 | 未开始 | 依赖 T0.3、T1.1 |
 | T3.1–T3.9 | 未开始 | |
@@ -382,6 +385,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-11 | src 布局、TOML 实验配置、pytest、Conventional Commits（英文） | 与现有配置及兄弟仓库一致 |
 | 2026-10-11 | WSL venv 放 `$HOME/.venvs/quantiloomfusion`，Windows venv 为 `.venv-win` | 共用工作树，两侧 venv 不能互相覆盖；9p 上建 venv 慢 |
 | 2026-10-11 | 配方指纹改为 datagen 导入闭包 | 包化后单文件哈希不再完整；同时避免消费端改动误伤续跑 |
+| 2026-10-12 | `build/` 改为指向 `H:\QuantiloomFusion-build` 的 junction | 用户确认并执行；机械盘空间大，代码和 venv 留在 SSD |
+| 2026-10-12 | datagen 对拍基线 = `bad41d3`（生成器首次入库） | `datagen-parity` 用 `git log --diff-filter=A` 自动找到它 |
+| 2026-10-12 | `.clang-tidy`、`.clangd` 暂不入库，留在工作区 | 属于 Quantiloom C++ 仓库；删除与否等用户决定 |
 
 ## 8. 待决问题与风险
 
@@ -404,6 +410,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：调研完成，`AGENTS.md`、本文与 `.devin/skills/*` 已写出但未提交。已自测：`dataset-inspect` 内联脚本在 `build/env-pilot-0.7.4` 上跑通；`datagen-parity` 比较脚本在 smoke 配置上对同一生成器给出 `PARITY OK`，篡改一个任务 TOML 后给出 `PARITY FAIL`（`build/_parity/selftest-20261011-200958`）；`commit` 的 message 自检正确拦截了 `M2 ... (3/5)`、`phase 1`、`T2.1`、URL、`WIP`。
-- 2026-10-12：`build/` 已由用户改为指向 `H:\QuantiloomFusion-build` 的 junction，核对结果见 §2.4；`.gitignore` 已在工作区改为 `/build`，两侧 git 均不再显示 `build`（未提交，属于 T0.2）。
-- 下一步：用户确认本文后，从 T0.1 开始；T0.3 的入库顺序决定了对拍基线 commit。
+- 当前停在：仓库基线已入库（T0.1–T0.3），`build/` 已迁到 H 盘并核对完整（§2.4）。skills 的内联脚本已自测：`dataset-inspect` 在 pilot 上跑通；`datagen-parity` 对同一生成器给出 `PARITY OK`、篡改后给出 `PARITY FAIL`（`build/_parity/selftest-20261011-200958`）；`commit` 的 message 自检能拦截里程碑、任务编号、进度、URL、`WIP`。
+- 下一步：T0.4（修正数据集文档与现状不符的几处，每处一个 commit），然后 T1.1（统一两侧 uv 版本，写 `pyproject.toml`）。

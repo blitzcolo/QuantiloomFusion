@@ -6,20 +6,23 @@ Windows interpreter sees it; the dataset must have been rendered by the account
 running the tests (attempt files are owner-ACL'd by the renderer).
 """
 import copy
-import importlib.util
 import json
 import math
 import os
 from pathlib import Path
+import socket
 import struct
+import subprocess
+import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
-SCRIPT=Path(__file__).resolve().parents[1]/'tools/generate_env_dataset.py'
-spec=importlib.util.spec_from_file_location('generator',SCRIPT)
-g=importlib.util.module_from_spec(spec);spec.loader.exec_module(g)
-ROOT=SCRIPT.parents[1]
+from quantiloom_fusion.core import jsonio, locking, paths, tomlio
+from quantiloom_fusion.datagen import constants, export_record, planner, publish, renderer, scene, settings
+
+ROOT=Path(__file__).resolve().parents[1]
 
 
 class PlanningContracts(unittest.TestCase):
@@ -38,10 +41,10 @@ class PlanningContracts(unittest.TestCase):
         model.write_bytes(struct.pack('<III',0x46546c67,2,20+len(payload))+struct.pack('<II',len(payload),0x4e4f534a)+payload)
         (self.root/'solar.csv').write_text('nm,direct,global\n400,1,2\n4000,0.01,0.02\n')
         self.scene=self.root/'scene.toml'
-        self.scene.write_text(g.toml_text({'renderer':{},'scene':{'gltf':model.as_posix(),'world_units_to_meters':2.0},
+        self.scene.write_text(tomlio.toml_text({'renderer':{},'scene':{'gltf':model.as_posix(),'world_units_to_meters':2.0},
             'camera':{'position':[0,1,6],'look_at':[0,1,0]},'lighting':{'solar_lut':'solar.csv'},
             'materials':[{'name':'Object','ir_emissivity':.9}]}))
-        self.settings=g.read_settings(ROOT/'configs/env_dataset.toml')
+        self.settings=settings.read_settings(ROOT/'configs/env_dataset.toml')
         # The fixture scene carries no [thermal] or spectral bindings, so the
         # formal config's solved/spectral policies cannot run against it.
         self.settings['dataset'].update(cli=self.cli.as_posix(),qt_root=self.root.as_posix(),verification='hashes',
@@ -52,10 +55,10 @@ class PlanningContracts(unittest.TestCase):
         self.out=self.root/'dataset'
 
     def tearDown(self):self.temp.cleanup()
-    def save(self):self.config.write_text(g.toml_text(self.settings))
+    def save(self):self.config.write_text(tomlio.toml_text(self.settings))
     def plan(self):
-        with patch.object(g.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
-            return g.plan(self.config,self.out)
+        with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
+            return planner.plan(self.config,self.out)
 
     def test_cartesian_coverage_fixed_profiles_and_metric_baselines(self):
         plan=self.plan()
@@ -63,10 +66,10 @@ class PlanningContracts(unittest.TestCase):
         self.assertEqual(len({s['sample_id'] for s in plan['samples']}),24)
         profiles={}
         for sample in plan['samples']:
-            self.assertEqual(set(sample['cameras']),set(g.BANDS))
+            self.assertEqual(set(sample['cameras']),set(constants.BANDS))
             poses={b:c['camera_to_world'] for b,c in sample['cameras'].items()}
             for b,c in sample['cameras'].items():
-                job=g.tomllib.loads((self.out/c['job']).read_text())
+                job=tomllib.loads((self.out/c['job']).read_text())
                 self.assertEqual(job['camera']['fov_y'],self.settings['cameras'][b]['fov_y_deg'])
                 self.assertEqual(job['renderer']['resolution'],self.settings['cameras'][b]['resolution'])
                 # noise_seed legitimately varies per sample under per_sample policy
@@ -84,14 +87,14 @@ class PlanningContracts(unittest.TestCase):
         (self.root/'solar.csv').write_text('nm,direct,global\n400,1,2\n4000,0.04,0.08\n')
         with self.assertRaisesRegex(ValueError,'different recipe'):self.plan()
         self.assertEqual(solar.read_bytes(),original)
-        self.assertEqual(g.load_json(self.out/'dataset.plan.json')['dataset_id'],before['dataset_id'])
+        self.assertEqual(jsonio.load_json(self.out/'dataset.plan.json')['dataset_id'],before['dataset_id'])
 
     def test_job_edit_and_parameter_typo_rejected(self):
         p=self.plan();job=self.out/p['samples'][0]['cameras']['vis']['job']
         job.write_text(job.read_text()+'# edited\n')
         with self.assertRaisesRegex(ValueError,'planned file changed'):self.plan()
         self.settings['cameras']['lwir']['responsivity_dn_per_w']=1e12;self.save()
-        with self.assertRaisesRegex(ValueError,'unknown cameras.lwir'):g.read_settings(self.config)
+        with self.assertRaisesRegex(ValueError,'unknown cameras.lwir'):settings.read_settings(self.config)
 
     def test_shader_change_accepted_within_same_cli_version(self):
         # Compiled blobs beside the binary are recorded in renderer_observed
@@ -101,17 +104,17 @@ class PlanningContracts(unittest.TestCase):
         first=self.plan();shader.write_bytes(b'compiled shader B')
         second=self.plan()
         self.assertEqual(first['dataset_id'],second['dataset_id'])
-        observed=g.load_json(self.out/'dataset.plan.json')['renderer_observed']
+        observed=jsonio.load_json(self.out/'dataset.plan.json')['renderer_observed']
         self.assertIn('raygen.spv',{Path(e['path']).name for e in observed})
-        with patch.object(g.subprocess,'check_output',return_value='Quantiloom 0.7.1\n'):
-            with self.assertRaisesRegex(ValueError,'different recipe'):g.plan(self.config,self.out)
+        with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.1\n'):
+            with self.assertRaisesRegex(ValueError,'different recipe'):planner.plan(self.config,self.out)
 
     def test_physics_source_change_rejected_within_same_cli_version(self):
         # A same-version rebuild that edits physics-relevant sources must not
         # resume a dataset: that is exactly the pre/post-fix mixing the
         # version string alone could not stop.
         self.plan()
-        self.assertTrue(g.load_json(self.out/'dataset.plan.json')['recipe']['physics_sources'])
+        self.assertTrue(jsonio.load_json(self.out/'dataset.plan.json')['recipe']['physics_sources'])
         (self.root/'src/shaders/raygen.hlsl').write_text('// shader v2\n')
         with self.assertRaisesRegex(ValueError,'different recipe'):self.plan()
 
@@ -119,76 +122,85 @@ class PlanningContracts(unittest.TestCase):
         plan=self.plan()
         by_band={};acq=set()
         for s in plan['samples']:
-            for b in g.BANDS:
-                job=g.tomllib.loads((self.out/s['cameras'][b]['job']).read_text())
+            for b in constants.BANDS:
+                job=tomllib.loads((self.out/s['cameras'][b]['job']).read_text())
                 # per_acquisition: one detector seed per band (FPN maps hold
                 # still), a distinct acquisition_index per capture drives the
                 # temporal noise classes.
                 by_band.setdefault(b,set()).add(job['sensor']['noise_seed'])
                 acq.add(job['dataset']['acquisition_index'])
         self.assertTrue(all(len(v)==1 for v in by_band.values()))
-        self.assertEqual(len(acq),len(plan['samples'])*len(g.BANDS))
+        self.assertEqual(len(acq),len(plan['samples'])*len(constants.BANDS))
         # fixed_detector: one seed per band and no acquisition counter. Policy
         # switches change the recipe, so each branch plans into its own
         # directory.
         self.settings['dataset']['noise_seed_policy']='fixed_detector';self.save()
         out2=self.root/'dataset2'
-        with patch.object(g.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
-            plan2=g.plan(self.config,out2)
+        with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
+            plan2=planner.plan(self.config,out2)
         by_band={}
         for s in plan2['samples']:
-            for b in g.BANDS:
-                job=g.tomllib.loads((out2/s['cameras'][b]['job']).read_text())
+            for b in constants.BANDS:
+                job=tomllib.loads((out2/s['cameras'][b]['job']).read_text())
                 by_band.setdefault(b,set()).add(job['sensor']['noise_seed'])
                 self.assertNotIn('acquisition_index',job['dataset'])
         self.assertTrue(all(len(v)==1 for v in by_band.values()))
         # per_sample: every capture draws all noise classes fresh.
         self.settings['dataset']['noise_seed_policy']='per_sample';self.save()
         out4=self.root/'dataset4'
-        with patch.object(g.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
-            plan4=g.plan(self.config,out4)
-        seeds={g.tomllib.loads((out4/s['cameras'][b]['job']).read_text())['sensor']['noise_seed']
-               for s in plan4['samples'] for b in g.BANDS}
-        self.assertEqual(len(seeds),len(plan4['samples'])*len(g.BANDS))
+        with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
+            plan4=planner.plan(self.config,out4)
+        seeds={tomllib.loads((out4/s['cameras'][b]['job']).read_text())['sensor']['noise_seed']
+               for s in plan4['samples'] for b in constants.BANDS}
+        self.assertEqual(len(seeds),len(plan4['samples'])*len(constants.BANDS))
         # overrides replace whole named sections of the scene config
         self.settings['scenes'][0]['overrides']={'lighting':{'sun_radiance':[0.0,0.0,0.0],'sky_radiance':[0.0,0.0,0.0],'sun_direction':[0.0,1.0,0.0]}};self.save()
         out3=self.root/'dataset3'
-        with patch.object(g.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
-            plan3=g.plan(self.config,out3)
-        job=g.tomllib.loads((out3/plan3['samples'][0]['cameras']['lwir']['job']).read_text())
+        with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.0\n'):
+            plan3=planner.plan(self.config,out3)
+        job=tomllib.loads((out3/plan3['samples'][0]['cameras']['lwir']['job']).read_text())
         self.assertEqual(job['lighting'],plan3['scenes'][0]['overrides']['lighting'])
         # solar_lut absent from a wholesale-replaced section -> no derived CSV
         self.assertEqual(plan3['scenes'][0]['assumptions']['ir_solar_tail'],'source CSV unchanged')
 
     def test_nested_motion_and_duplicate_camera_offsets_rejected(self):
-        with self.assertRaisesRegex(ValueError,'model motion'):g.reject_motion({'models':[{'motion':{'velocity':[1,0,0]}}]})
+        with self.assertRaisesRegex(ValueError,'model motion'):scene.reject_motion({'models':[{'motion':{'velocity':[1,0,0]}}]})
         self.settings['cameras']['mwir']['offset_rdf_m']=self.settings['cameras']['vis']['offset_rdf_m'];self.save()
-        with self.assertRaisesRegex(ValueError,'distinct local positions'):g.read_settings(self.config)
+        with self.assertRaisesRegex(ValueError,'distinct local positions'):settings.read_settings(self.config)
 
     def test_path_translation_round_trip(self):
-        self.assertEqual(g.native_path('H:/a/b',posix=True),Path('/mnt/h/a/b'))
-        self.assertEqual(g.native_path('h:\\a\\b',posix=True),Path('/mnt/h/a/b'))
-        self.assertEqual(g.native_path('rel/c.toml',posix=True),Path('rel/c.toml'))
-        self.assertEqual(g.native_path('/mnt/h/a',posix=False),Path('H:/a'))
-        self.assertEqual(g.canonical_path(Path('/mnt/h/a'),posix=True),'H:/a')
-        self.assertEqual(g.canonical_path(Path('H:/a'),posix=False),'H:/a')
-        self.assertEqual(g.canonical_path(Path('/tmp/x'),posix=True),'/tmp/x')
+        self.assertEqual(paths.native_path('H:/a/b',posix=True),Path('/mnt/h/a/b'))
+        self.assertEqual(paths.native_path('h:\\a\\b',posix=True),Path('/mnt/h/a/b'))
+        self.assertEqual(paths.native_path('rel/c.toml',posix=True),Path('rel/c.toml'))
+        self.assertEqual(paths.native_path('/mnt/h/a',posix=False),Path('H:/a'))
+        self.assertEqual(paths.canonical_path(Path('/mnt/h/a'),posix=True),'H:/a')
+        self.assertEqual(paths.canonical_path(Path('H:/a'),posix=False),'H:/a')
+        self.assertEqual(paths.canonical_path(Path('/tmp/x'),posix=True),'/tmp/x')
 
     def test_single_writer_and_crash_released_mutex(self):
         self.out.mkdir()
-        with g.runner_lock(self.out):
+        with locking.runner_lock(self.out):
             with self.assertRaisesRegex(ValueError,'active'):
-                with g.runner_lock(self.out):pass
-        g.atomic_json(self.out/'.generator.lock',{'host':g.socket.gethostname(),'pid':-1,'child_pid':None,'token':'stale'})
-        with g.runner_lock(self.out):pass
+                with locking.runner_lock(self.out):pass
+        jsonio.atomic_json(self.out/'.generator.lock',{'host':socket.gethostname(),'pid':-1,'child_pid':None,'token':'stale'})
+        with locking.runner_lock(self.out):pass
         self.assertFalse((self.out/'.generator.lock').exists())
+
+    def test_tools_shim_runs_help(self):
+        env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'}
+        with tempfile.TemporaryDirectory() as cwd:
+            proc=subprocess.run([sys.executable,str(ROOT/'tools/generate_env_dataset.py'),'--help'],
+                                cwd=cwd,env=env,capture_output=True,text=True)
+        self.assertEqual(proc.returncode,0)
+        self.assertIn('plan',proc.stdout)
+        self.assertIn('verify',proc.stdout)
 
 
 @unittest.skipUnless(os.environ.get('QUANTILOOM_TEST_DATASET'),'set QUANTILOOM_TEST_DATASET for real export tests')
 class ExportRecoveryContracts(unittest.TestCase):
     def setUp(self):
         self.source=Path(os.environ['QUANTILOOM_TEST_DATASET']).resolve()
-        self.plan=g.load_json(self.source/'dataset.plan.json');self.sample=self.plan['samples'][0]
+        self.plan=jsonio.load_json(self.source/'dataset.plan.json');self.sample=self.plan['samples'][0]
         self.temp=tempfile.TemporaryDirectory();self.out=Path(self.temp.name)
         self.band='vis';self.camera=self.sample['cameras'][self.band]
         self.attempt=self.source/'attempts'/self.sample['sample_id']/self.band/'attempt-0001'
@@ -196,20 +208,20 @@ class ExportRecoveryContracts(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
 
     def test_recover_published_files_without_receipt_and_reject_corruption(self):
-        receipt,summary=g.publish(self.out,self.sample,self.band,self.attempt,self.camera,True)
-        g.receipt_path(self.out,self.sample,self.band).unlink()
-        recovered,_=g.publish(self.out,self.sample,self.band,self.attempt,self.camera,True)
+        receipt,summary=publish.publish(self.out,self.sample,self.band,self.attempt,self.camera,True)
+        publish.receipt_path(self.out,self.sample,self.band).unlink()
+        recovered,_=publish.publish(self.out,self.sample,self.band,self.attempt,self.camera,True)
         self.assertEqual(recovered['record_id'],receipt['record_id'])
-        self.assertIsNotNone(g.valid_receipt(self.out,self.sample,self.band,True))
+        self.assertIsNotNone(publish.valid_receipt(self.out,self.sample,self.band,True))
         product=self.out/Path(receipt['record']).parent/'frame_rawdn.exr'
         with product.open('r+b') as f:f.seek(16);f.write(b'CORRUPT!')
-        with self.assertRaisesRegex(ValueError,'corrupt product'):g.valid_receipt(self.out,self.sample,self.band,False)
+        with self.assertRaisesRegex(ValueError,'corrupt product'):publish.valid_receipt(self.out,self.sample,self.band,False)
 
     def test_effective_pose_and_fov_differences_rejected(self):
         wrong=copy.deepcopy(self.camera);wrong['camera_to_world'][3]+=.02
-        with self.assertRaisesRegex(ValueError,'camera pose'):g.verify_capture(self.attempt/'frame.metadata.json',wrong,False)
+        with self.assertRaisesRegex(ValueError,'camera pose'):export_record.verify_capture(self.attempt/'frame.metadata.json',wrong,False)
         wrong=copy.deepcopy(self.camera);wrong['profile']['fov_y_deg']+=1
-        with self.assertRaisesRegex(ValueError,'FOV/intrinsics'):g.verify_capture(self.attempt/'frame.metadata.json',wrong,False)
+        with self.assertRaisesRegex(ValueError,'FOV/intrinsics'):export_record.verify_capture(self.attempt/'frame.metadata.json',wrong,False)
 
 
 if __name__=='__main__':unittest.main()

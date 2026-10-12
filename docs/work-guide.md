@@ -401,7 +401,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T3.7 | 完成 | `0ffed23`。判据：4 个双线性源邻居 validity 全为 1；双线性采样的源 `truth_world_position` 与参考点距离 ≤ `pos_rel_tol`·深度（替代 z 测试，同时用到两台相机各自的真值）；边缘带用世界坐标二阶差分（相邻深度跳变判据在掠射地面上误标 54% 的 LWIR 像素，已弃用）。默认 `edge_px=1, edge_rel_tol=0.02, pos_rel_tol=0.005`。pilot 24 样本：VIS→LWIR 有效 58%（其余主要在 LWIR 视场外），LWIR→VIS 91%，VIS→MWIR 46%，MWIR→LWIR 86%；线性重采样位置残差中位 1e-5～2e-5 深度。参数扫描与判据可视化见 `build/_geom/measure_warp.py`、`criterion-vis-to-lwir.png` |
 | T3.8 | 未开始 | |
 | T3.9 | 进行中 | 首个数据点：pilot 全部 72 个 rawdn（24 样本 × 3 波段）读取，WSL 0.85 s（11.8 ms/个）vs Windows 0.10 s（1.4 ms/个），经 9p 读 H 盘约慢 8 倍（`build/_refactor/pilot_reader_check.py`，热缓存，待用更大读量与冷缓存复测） |
-| T4.1–T4.7 | 未开始 | |
+| T4.1 | 未开始 | 待决：VIS 用 `display` RGB 还是 RAW 去马赛克 |
+| T4.2 | 完成 | `d0cf988`：`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`。pilot 24 样本对 oracle 的 EPE 中位（源像素）：VIS→LWIR resize 1.86 / 无穷远单应 1.16；LWIR→VIS 3.24 / 2.02；VIS→MWIR 2.11 / 1.28；MWIR→LWIR 3.27 / 1.99。VIS→LWIR 单应误差随深度：<5 m 2.55、5–10 m 1.53、10–20 m 0.83、20–50 m 0.39、>50 m 0.20 px（与 f·b/z 一致），58% 的 oracle 有效像素误差 > 1 px（`build/_geom/measure_registrars.py`） |
+| T4.3–T4.7 | 未开始 | |
 | T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 
@@ -448,5 +450,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 3 的 T3.1–T3.7 完成（读取、分折、相机模型、oracle 重投影）。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
-- 下一步：阶段 4：T4.2 配准（`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`）、T4.1 归一化（VIS 用 display 还是 RAW 待决）、T4.3/T4.4 从 paper-exp 移植基线与指标；子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。T3.8（torch 适配）与 T3.9（IO 吞吐）在训练前再做。
+- 当前停在：阶段 3 的 T3.1–T3.7 与 T4.2 完成。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
+- 下一步：待用户决定 T4.1 的 VIS 输入形式；随后 T4.3/T4.4 从 paper-exp 移植经典基线与指标（`port-from-paper-exp`），T4.5 第一次端到端（pilot/子集上「波段子集 × 经典基线 × oracle/单应配准」）。子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。

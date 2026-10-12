@@ -383,7 +383,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T2.16 | 完成 | WSL 下 Ctrl+C（PTY 前台）两次：`Quantiloom.exe` ≤1 s 退出，rc 130，状态 `interrupted`，锁释放；无需补 Windows 侧终止方案。注意后台 `&` 进程继承被忽略的 SIGINT，`kill -INT` 无效，不能用来模拟 |
 | T3.1–T3.9 | 未开始 | |
 | T4.1–T4.7 | 未开始 | |
-| T5.1–T5.4 | 未开始 | T5.1 的前置（T2.15）已满足，待用户决定采集规模后冻结 datagen 并开跑 |
+| T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
+| T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 
 ## 7. 决策记录
 
@@ -406,6 +407,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | 审计保留为 `tools/` 下的独立脚本，以子进程调用，不迁入 `datagen/audit/` | 子进程隔离 + 300 s 超时在 11 天长跑中更稳；审计在模块级依赖 numpy/OpenEXR/safetensors，放进 datagen 会破坏"仅标准库"约束；它们本就不进配方指纹 |
 | 2026-10-12 | `FakeRenderer` 放在 `tests/`，不进包 | 只给测试用；放进 datagen 会无谓地进入配方指纹 |
 | 2026-10-12 | 首次规划的系统冻结计划；跨系统重规划按 1e-12 容差比对，保留已存文件 | 两系统 libm 末位不同是平台事实，逐字节一致做不到；保留首次文件让 `job_sha256` 与磁盘一致 |
+| 2026-10-12 | 先跑 96 三元组子集，全量随后另开目录 | 用户确认；让阶段 3/4 尽早用上全分辨率真实数据 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
@@ -413,7 +415,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 待决：
 
-- 正式采集规模：按实测约 264 GPU 小时；是否先跑一个子集（如每场景 8 方位）以尽早开始阶段 4 的真实数据实验。
+- 子集跑完后：何时启动全量采集（约 264 GPU 小时）。
 - 工况标签是否在配置/样本清单中显式化（目前只能从 `scene_id` 后缀推导）。
 - `sample.json` 是否升 v2（真值按产品名索引）。
 - VIS 融合输入：`display` RGB 还是 RAW 去马赛克；输出保留颜色还是灰度。
@@ -427,5 +429,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 2 完成（T2.1–T2.16）。datagen 已拆包、指纹覆盖导入闭包、可跨系统续跑、审计在 WSL 下可用，并经真实 smoke 渲染验证。两侧 78 passed / 2 skipped。
-- 下一步：两条线可并行——(a) 用户决定正式采集规模（全量约 264 GPU 小时，或先跑子集），然后冻结 datagen（记录冻结 commit）开跑 T5.1；(b) 阶段 3 消费端：T3.1 `dataset.exr` → T3.2 schema → T3.3 reader → T3.4 合成夹具。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：阶段 2 完成；子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`tail build/env-subset-0.7.4.log`；中断后用同一条 run 命令续跑（任一系统均可）。
+- 下一步：子集跑完后 `verify --inspect-exr` 并汇总 CLOSURE 行与实测吞吐（校正 §2.2 的外推）；同时推进阶段 3：T3.1 `dataset.exr` → T3.2 schema → T3.3 reader → T3.4 合成夹具。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

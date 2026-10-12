@@ -381,7 +381,12 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T2.14 | 完成 | `32a0a89`、`e3bfba9`：闭合审计与光谱积分审计改为经 `native_path` 取模型包。pilot `concrete_a007_e00_r00_n00/lwir/attempt-0001`：旧脚本在 WSL 下 `FileNotFoundError`（复现缺陷）；新旧脚本在 Windows 下输出逐字节相同；新脚本在 WSL 下与存档 `closure_audit.txt` 一致（`mean=-2.234 rms=6.384`）；经 `run_closure_audit` 调用同样得到 residual 行。光谱审计两侧输出一致 |
 | T2.15 | 完成 | 用新包真实渲染 smoke（Quantiloom 0.7.4）：`build/env-smoke-20261012-103949`（一次跑完）与 `build/env-smoke-int2-20261012-104814`（中断后续跑，约 3 分 51 秒，`rendered=18 failed=0`，无 QA 警告）；两侧 `verify --inspect-exr` 均 `complete=6, partial=0, planned=6`；WSL 下 CLOSURE 行给出残差（grassland `mean=+0.089 rms=6.801`）；夜间 VIS rawdn 中位 0、月光 6.0，与 0.7.4 基线一致；带真实数据集两侧 `77 passed, 0 skipped`（当时计数）。正式配置跨系统规划：`dataset_id` 相同（`c2625af5…`），但 549 个任务 TOML 差 1 ULP → 发现并修正跨系统重规划缺陷（`aa07475`，两方向实测续跑不改文件，`build/_parity/20261012-110816-formal-replan-wsl2win`、`-111128-formal-replan-win2wsl`）。文档与 skills 同步（`be21fe3`…`399fd2f`） |
 | T2.16 | 完成 | WSL 下 Ctrl+C（PTY 前台）两次：`Quantiloom.exe` ≤1 s 退出，rc 130，状态 `interrupted`，锁释放；无需补 Windows 侧终止方案。注意后台 `&` 进程继承被忽略的 SIGINT，`kill -INT` 无效，不能用来模拟 |
-| T3.1–T3.9 | 未开始 | |
+| T3.1 | 完成 | `a3a09ed` `dataset/exr.py`（`read_channels`/`read_image`/`read_header`/`write_image`） |
+| T3.2 | 完成 | `edf9683`（`Product.channels`）、`937f670` `dataset/schema.py`：严格解析 index/plan 子集/sample；产品名由文件名推导（`frame_<x>.exr/json`→`<x>`，`frame.exr`→`rendered_reference`，`frame.png`→`preview`，其他报错）；四个传感器产品的 geometry 必须一致；用 FakeRenderer 产出的 sample.json 做生产端/消费端交叉检查 |
+| T3.3 | 完成 | `3e593ab` `ThreeBandDataset`。pilot 24 个样本两侧全部解析；样本 0 每波段 13 个 EXR 产品可读（VIS 640×360、MWIR 320×256、LWIR 256×192），实例 ID 与材质 ID 文件同名通道 `instance_id` 但按文件区分正确。工况推导仍按 `scene_id` 后缀（`condition_of`） |
+| T3.4 | 完成 | `6410cc6` `tests/dataset_fixture.py`：各波段分辨率不同的微型数据集。两侧 90 passed / 5 skipped |
+| T3.5–T3.8 | 未开始 | |
+| T3.9 | 进行中 | 首个数据点：pilot 全部 72 个 rawdn（24 样本 × 3 波段）读取，WSL 0.85 s（11.8 ms/个）vs Windows 0.10 s（1.4 ms/个），经 9p 读 H 盘约慢 8 倍（`build/_refactor/pilot_reader_check.py`，热缓存，待用更大读量与冷缓存复测） |
 | T4.1–T4.7 | 未开始 | |
 | T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
@@ -429,5 +434,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 2 完成；子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`tail build/env-subset-0.7.4.log`；中断后用同一条 run 命令续跑（任一系统均可）。
-- 下一步：子集跑完后 `verify --inspect-exr` 并汇总 CLOSURE 行与实测吞吐（校正 §2.2 的外推）；同时推进阶段 3：T3.1 `dataset.exr` → T3.2 schema → T3.3 reader → T3.4 合成夹具。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：阶段 2 完成；阶段 3 的 T3.1–T3.4 完成（EXR IO、严格 schema、`ThreeBandDataset`、合成夹具）。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`；中断后用同一条 run 命令续跑（任一系统均可）。
+- 下一步：T3.6 相机模型（先在 pilot 上实测投影约定与残差，再定阈值）→ T3.7 oracle 重投影 → T3.5 分折；子集跑完后 `verify --inspect-exr` 并汇总 CLOSURE 行与实测吞吐。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

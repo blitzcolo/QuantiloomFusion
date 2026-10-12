@@ -18,7 +18,7 @@ def _warp(g_src, g_ref=None):
 
 
 def _input(images, warps, reference=Band.VIS):
-    geoms = {b: geometry(8, 6, 4.0) for b in images}
+    geoms = {b: geometry(a.shape[1], a.shape[0], 4.0) for b, a in images.items()}
     return FusionInput(reference=reference, images=images, geometry=geoms, warps=warps)
 
 

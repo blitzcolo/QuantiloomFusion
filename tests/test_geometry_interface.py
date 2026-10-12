@@ -43,14 +43,6 @@ def test_camera_from_geometry_stores_it():
     assert cam.geometry is g
 
 
-def test_camera_stubs_raise():
-    cam = BrownConradyCamera.from_geometry(CameraGeometry(**GEO_KWARGS))
-    with pytest.raises(NotImplementedError):
-        cam.project(np.zeros((1, 3)))
-    with pytest.raises(NotImplementedError):
-        cam.unproject(np.zeros((1, 2)), np.ones(1))
-
-
 def test_warp_valid_construction():
     warp = make_warp()
     assert warp.map_xy.shape == (4, 5, 2)

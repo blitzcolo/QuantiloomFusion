@@ -132,7 +132,7 @@ src 布局，导入名 `quantiloom_fusion`。箭头表示"可以导入"：
 | `evaluation` | 指标、互补信息分析、结果存储 | 以上全部（除 `datagen`、`experiments`） | numpy；scipy/torch 按需 |
 | `experiments` | 实验配置（TOML）解析与驱动 | 以上全部（除 `datagen`） | 同上 |
 
-硬约束由 `tests/test_boundaries.py` 用 AST 检查：消费端不 import `datagen`；`core`/`datagen` 模块顶层不 import 第三方包；只有 `datagen/renderer.py` 使用 `subprocess`；只有 `dataset/exr.py` 导入 `OpenEXR`；`torch` 只出现在标注为可选的模块中。
+硬约束由 `tests/test_boundaries.py` 用 AST 检查：消费端不 import `datagen`；`core`/`datagen` 模块顶层不 import 第三方包；只有 `datagen/renderer.py` 使用 `subprocess`；只有 `dataset/exr.py` 导入 `OpenEXR`/`Imath`；`torch` 只出现在模块级声明了 `__optional_deps__ = ("torch",)` 的模块中；包内不得出现 `Path("H:/...")` 这类盘符字面量；不在上表中的子包（含包根下的散落模块）直接报错，新增子包先改上表与测试的分层表。
 
 `tools/generate_env_dataset.py` 保留为薄壳：把 `<repo>/src` 插入 `sys.path` 后调用 `quantiloom_fusion.datagen.cli.main`，保证裸 Python 不安装也能生成数据集，且文档里的命令不变。
 

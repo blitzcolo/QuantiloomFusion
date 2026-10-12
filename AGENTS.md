@@ -56,7 +56,7 @@ VIS / MWIR / LWIR 三波段**未配准异构传感器**融合实验工作区。�
 - `core/` 与 `datagen/` 运行时**只用标准库**（像素 QA 与审计可在函数内惰性导入 numpy/OpenEXR）。数据生成必须能用裸 Python ≥ 3.11 跑。
 - 消费端（`dataset/` `geometry/` `signal/` `registration/` `fusion/` `evaluation/` `experiments/`）**不得 import `datagen`**；它们只读发布出来的数据集契约（`dataset.index.json`、`sample.json` 及其指向的产品）。
 - 只有 `datagen/renderer.py` 可以启动渲染器进程；只有 `datagen/export_record.py` 解析 Quantiloom 的 `frame.metadata.json`；只有 `dataset/exr.py` 导入 OpenEXR。
-- `torch` 只出现在明确标注为可选的模块里；没装 torch 时其余部分必须可导入、可测试。
+- `torch` 只出现在模块级声明了 `__optional_deps__ = ("torch",)` 的模块里；没装 torch 时其余部分必须可导入、可测试。
 - 边界由 `tests/test_boundaries.py`（AST 级 import 检查）锁定；改边界先改文档与该测试。
 - 物理和渲染算法属于 Quantiloom-dev，不在这里"修"。发现物理疑点：记录到 work-guide 的待核实清单，并说明证据。
 

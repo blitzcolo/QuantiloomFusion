@@ -375,7 +375,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T1.4 | 完成 | 每个边界一个 commit：`a00edc0` `core.bands.Band`（StrEnum，与生成器 `BANDS` 逐值相同）→ `6307aeb` `dataset.types` → `039a772` geometry → `42ab89c` signal → `bef38e0` registration → `916f1cf` fusion（含已实现的注册表与 `check_input`）→ `1f91daf` evaluation。两侧 `uv run pytest -q` 均 `60 passed, 2 skipped`；导入全部消费端子包后 `torch` 不在 `sys.modules` |
 | T1.5 | 完成 | `1ae708b`；`AGENTS.md` 同步（`266a9df`） |
 | T2.1–T2.11 | 完成 | 17 个 commit（`1dbe826`…`eb94380`）：core（paths、hashing/jsonio/tomlio、locking、vec）→ datagen（constants、settings、scene、solar、sensor、renderer、export_record、planner、publish、index、runner+verify、cli）；`tools/generate_env_dataset.py` 现为 11 行薄壳。**每一步**都在 smoke 配置上 `PARITY OK`（目录 `build/_parity/20261012-0947*`…`-101558-17-cli`），两侧 pytest 通过，两个裸解释器 `--help` 输出一致。AST 逐函数比对：原 43 个函数中 40 个逐字节相同，只有 `plan`（`is_drive_path`、`QuantiloomCli.version()`）、`run_dataset`（`is_drive_path`、`renderer.start`、`RenderProcess.terminate`、`run_closure_audit`、审计脚本路径改为从仓库根定位）、`main`（`CalledProcessError` 来自 renderer）有意改动。`RenderProcess.terminate` 在两侧用真实子进程验证过。测试改为直接导入包（61 passed / 2 skipped）。顺带：`test_boundaries` 放宽为 datagen 函数内可惰性导入 OpenEXR（`24915e5`，与 AGENTS.md 原有约定一致） |
-| T2.12–T2.16 | 未开始 | |
+| T2.12 | 完成 | `b74fb8e`：`datagen/fingerprint.py`；闭包 24 个文件（13 个 datagen 模块 + 7 个 core 模块 + 4 个 `__init__`），`core/bands.py` 与消费端不在内。smoke 与正式配置对拍均 `PARITY OK`（`build/_parity/20261012-102129-fp-smoke`、`-102152-fp-formal`，后者 7785 个文件）；WSL 与 Windows 规划到同一目录时 `dataset.plan.json` 逐字节相同（`dataset_id` `b8da87a5…`，`build/_parity/20261012-102242-crossos2`）。两侧 67 passed / 2 skipped |
+| T2.13–T2.16 | 未开始 | |
 | T3.1–T3.9 | 未开始 | |
 | T4.1–T4.7 | 未开始 | |
 | T5.1–T5.4 | 未开始 | T5.1 依赖 T2.15 完成并冻结 |
@@ -419,5 +420,5 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：T2.1–T2.11 完成，生成器已全部进入 `quantiloom_fusion.datagen`；临时状态：`recipe.generator_sha256` 只哈希 `datagen/planner.py`（T2.12 修正前不要用新代码规划任何要长期保留的数据集）。
-- 下一步：T2.12 配方指纹改为 datagen 导入闭包（§3.4），然后 T2.13 `FakeRenderer`、T2.14 审计迁入、T2.15 收尾验证。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。
+- 当前停在：T2.1–T2.12 完成：生成器已拆包，配方指纹覆盖 datagen 导入闭包（`recipe.generator_files`）。
+- 下一步：T2.13 `FakeRenderer` + 无 GPU 的 run/publish/恢复/损坏/verify 测试；然后 T2.14 审计迁入、T2.15 收尾验证（含真实 smoke 渲染）、T2.16 interop 中断验证。从 WSL 调 Windows `python -c` 时 interop 会弄坏带空格的双引号参数，改用脚本文件。

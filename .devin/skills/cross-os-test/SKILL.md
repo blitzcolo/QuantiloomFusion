@@ -11,11 +11,7 @@ allowed-tools:
 
 本仓库要求 Windows 原生与 WSL2 都能跑。只在一侧通过不算验证完成。
 
-## 选择命令形式
-
-仓库根目录有 `pyproject.toml` → 用 uv 形式；没有 → 用 unittest 回退形式。
-
-### uv 形式
+## 命令
 
 ```bash
 cd /mnt/d/QuantiloomFusion
@@ -30,15 +26,7 @@ cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run pytest -q"
 - 需要 torch 的测试在未装 `torch` extra 时应跳过而非失败；要跑它们加 `--extra torch`（Windows 下载约 2.4 GB）。
 - 默认不跑 `gpu` 标记的测试。要跑：`-m gpu`（需要渲染器与 RTX GPU，且不能和正在进行的正式采集抢 GPU，先查 `tasklist.exe | grep -i quantiloom`）。
 
-### unittest 回退形式（`pyproject.toml` 落地之前）
-
-```bash
-cd /mnt/d/QuantiloomFusion
-python3 -m unittest discover -s tests -v
-/mnt/h/paper-exp/.venv/Scripts/python.exe -m unittest discover -s tests -v
-```
-
-第二个解释器是从 paper-exp 借来的 Windows Python 3.13.3（有 numpy + OpenEXR），只读使用，不要往里装包。基线：两侧都是 `Ran 11 tests ... OK (skipped=2)`（2026-10-11）。
+基线：两侧都是 `9 passed, 2 skipped`（2026-10-12，uv 0.12.10）。改了依赖后两侧都跑一次 `uv lock --check`。
 
 ## 真实数据集测试
 

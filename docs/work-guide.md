@@ -351,7 +351,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ### 阶段 4：信号、配准、融合、评价的首批实现
 
-- **T4.1** 归一化策略；VIS 用 `display` RGB 还是 RAW 去马赛克（待决，两者都应可选）。
+- **T4.1** 归一化策略。VIS 两种输入都实现、按实验配置切换：`display`（sRGB，已含色调映射）与线性 RAW（RGGB 去马赛克）。融合输出同时给彩色与灰度：先在亮度通道融合，灰度输出即融合后的 Y，彩色输出把 VIS 的色度合回去；指标统一在 Y 上算，彩色版另给色彩保真度指标。红外不用 `display`（含场景相关拉伸）。
 - **T4.2** `OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar` 与 `registration_error`。
 - **T4.3** 从 paper-exp 移植经典基线并推广到 N 波段（`port-from-paper-exp`）。
 - **T4.4** 移植指标（EN、SD、SF、AG、SCD、Qabf、MS-SSIM、PSNR、SSIM），源参考类指标推广到多源。
@@ -401,7 +401,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T3.7 | 完成 | `0ffed23`。判据：4 个双线性源邻居 validity 全为 1；双线性采样的源 `truth_world_position` 与参考点距离 ≤ `pos_rel_tol`·深度（替代 z 测试，同时用到两台相机各自的真值）；边缘带用世界坐标二阶差分（相邻深度跳变判据在掠射地面上误标 54% 的 LWIR 像素，已弃用）。默认 `edge_px=1, edge_rel_tol=0.02, pos_rel_tol=0.005`。pilot 24 样本：VIS→LWIR 有效 58%（其余主要在 LWIR 视场外），LWIR→VIS 91%，VIS→MWIR 46%，MWIR→LWIR 86%；线性重采样位置残差中位 1e-5～2e-5 深度。参数扫描与判据可视化见 `build/_geom/measure_warp.py`、`criterion-vis-to-lwir.png` |
 | T3.8 | 未开始 | |
 | T3.9 | 进行中 | 首个数据点：pilot 全部 72 个 rawdn（24 样本 × 3 波段）读取，WSL 0.85 s（11.8 ms/个）vs Windows 0.10 s（1.4 ms/个），经 9p 读 H 盘约慢 8 倍（`build/_refactor/pilot_reader_check.py`，热缓存，待用更大读量与冷缓存复测） |
-| T4.1 | 未开始 | 待决：VIS 用 `display` RGB 还是 RAW 去马赛克 |
+| T4.1 | 未开始 | 已定：VIS 的 display 与线性 RAW 两种输入可切换；输出彩色与灰度两种 |
 | T4.2 | 完成 | `d0cf988`：`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`。pilot 24 样本对 oracle 的 EPE 中位（源像素）：VIS→LWIR resize 1.86 / 无穷远单应 1.16；LWIR→VIS 3.24 / 2.02；VIS→MWIR 2.11 / 1.28；MWIR→LWIR 3.27 / 1.99。VIS→LWIR 单应误差随深度：<5 m 2.55、5–10 m 1.53、10–20 m 0.83、20–50 m 0.39、>50 m 0.20 px（与 f·b/z 一致），58% 的 oracle 有效像素误差 > 1 px（`build/_geom/measure_registrars.py`） |
 | T4.3–T4.7 | 未开始 | |
 | T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
@@ -429,6 +429,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | `FakeRenderer` 放在 `tests/`，不进包 | 只给测试用；放进 datagen 会无谓地进入配方指纹 |
 | 2026-10-12 | 首次规划的系统冻结计划；跨系统重规划按 1e-12 容差比对，保留已存文件 | 两系统 libm 末位不同是平台事实，逐字节一致做不到；保留首次文件让 `job_sha256` 与磁盘一致 |
 | 2026-10-12 | 先跑 96 三元组子集，全量随后另开目录 | 用户确认；让阶段 3/4 尽早用上全分辨率真实数据 |
+| 2026-10-12 | VIS 输入 `display` 与线性 RAW 都做、可切换；融合输出彩色与灰度都给 | 用户确认；哪种更好待实验回答。两种输出来自同一次亮度通道融合，指标在 Y 上算以保持可比 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
@@ -439,7 +440,6 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 - 子集跑完后：何时启动全量采集（约 264 GPU 小时）。
 - 工况标签是否在配置/样本清单中显式化（目前只能从 `scene_id` 后缀推导）。
 - `sample.json` 是否升 v2（真值按产品名索引）。
-- VIS 融合输入：`display` RGB 还是 RAW 去马赛克；输出保留颜色还是灰度。
 
 风险：
 

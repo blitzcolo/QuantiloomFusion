@@ -106,11 +106,20 @@ def _geometry_doc(w=8, h=6):
     }
 
 
+CONFIG_TOML = (
+    "[sensor]\ncfa = \"mono\"\n"
+    "[sensor.exposure]\ntime_s = 0.03\n"
+    "[sensor.readout]\nadc_bits = 14\nblack_level_dn = 0\nelectrons_per_dn = 1\n"
+    "[isp]\nwhite_balance = [1, 1, 1]\n"
+    "device_to_linear_srgb = [1, 0, 0, 0, 1, 0, 0, 0, 1]\n"
+)
+
+
 def _observation(w=8, h=6):
     sensor = {"path": "f.exr",
               "signal": {"kind": "k", "unit": "u", "transfer": "linear", "camera_cfa": "0",
                          "channels": ["Y"], "colour_space": "none", "storage": "float32"},
-              "provenance": {"geometry": _geometry_doc(w, h)},
+              "provenance": {"geometry": _geometry_doc(w, h), "camera_config_toml": CONFIG_TOML},
               "image_metadata": {}}
     prods = {k: copy.deepcopy(sensor) for k in ("measurement", "rawdn", "corrected", "display")}
     prods["rendered_reference"] = {"path": "frame.exr", "role": "r", "description": {}}
@@ -161,3 +170,44 @@ def test_negative_cases():
     doc["observations"]["vis"]["extra_products"] = {"samples/s0/vis/v0001/frame_measurement.exr": {}}
     with pytest.raises(ValueError, match="duplicate"):
         schema.parse_sample(doc)
+
+
+def test_readout_parsed():
+    s = schema.parse_sample(_minimal_sample())
+    r = s.observations[Band.VIS].readout
+    assert r.cfa == "mono" and r.adc_bits == 14
+    assert r.exposure_s == pytest.approx(0.03) and r.electrons_per_dn == 1.0
+    assert r.white_balance == (1.0, 1.0, 1.0)
+    assert r.device_to_linear_srgb == (1, 0, 0, 0, 1, 0, 0, 0, 1)
+
+
+def test_readout_negative_cases():
+    doc = _minimal_sample()
+    del doc["observations"]["vis"]["products"]["rawdn"]["provenance"]["camera_config_toml"]
+    with pytest.raises(ValueError, match="camera_config_toml"):
+        schema.parse_sample(doc)
+
+    doc = _minimal_sample()
+    prov = doc["observations"]["vis"]["products"]["display"]["provenance"]
+    prov["camera_config_toml"] = prov["camera_config_toml"].replace('cfa = "mono"', 'cfa = "rggb"')
+    with pytest.raises(ValueError, match="camera_config_toml"):
+        schema.parse_sample(doc)
+
+    doc = _minimal_sample()
+    for name in ("measurement", "rawdn", "corrected", "display"):
+        doc["observations"]["vis"]["products"][name]["provenance"]["camera_config_toml"] = (
+            "[sensor]\ncfa = \"mono\"\n"
+        )
+    with pytest.raises(ValueError, match="readout"):
+        schema.parse_sample(doc)
+
+
+@pytest.mark.skipif(not DATASET, reason="set QUANTILOOM_TEST_DATASET for real dataset tests")
+def test_real_dataset_readout():
+    root = Path(DATASET).resolve()
+    index = schema.parse_index(jsonio.load_json(root / "dataset.index.json"))
+    s = schema.parse_sample(jsonio.load_json(root / index.entries[0].manifest))
+    vis = s.observations[Band.VIS].readout
+    assert vis.cfa == "rggb" and vis.adc_bits == 12
+    lwir = s.observations[Band.LWIR].readout
+    assert lwir.cfa == "mono" and lwir.adc_bits == 14

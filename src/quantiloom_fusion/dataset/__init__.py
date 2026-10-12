@@ -15,6 +15,7 @@ from .types import (
     Condition,
     Observation,
     Product,
+    Readout,
     Sample,
     SampleParameters,
     SignalSemantics,

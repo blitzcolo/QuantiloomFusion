@@ -108,7 +108,15 @@ class FakeRenderer:
             "pixel_origin": "top_left",
             "world_units_to_meters": 1.0,
         }
-        sensor_toml = toml_text({"sensor": job["sensor"]})
+        # The real renderer echoes the resolved config back into provenance:
+        # cfa and readout defaults come from the sensor preset, isp gains the
+        # white balance and colour matrix it actually applied.
+        sensor = {**job["sensor"]}
+        sensor["cfa"] = {"generic_cmos": "rggb"}.get(sensor.get("preset"), "mono")
+        sensor["readout"] = {"black_level_dn": 0, "electrons_per_dn": 1.0, **sensor["readout"]}
+        isp = {**job.get("isp", {}), "white_balance": [1.0, 1.0, 1.0],
+               "device_to_linear_srgb": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]}
+        sensor_toml = toml_text({"sensor": sensor, "isp": isp})
         record_id = uuid.uuid4().hex * 2
         replay = workdir / "frame.replay.toml"
         replay.write_text('frame = "replay"\n', encoding="utf-8", newline="\n")

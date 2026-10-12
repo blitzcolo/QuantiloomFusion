@@ -7,6 +7,7 @@ product is added to the contract on purpose, not by accident.
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -16,6 +17,7 @@ from .types import (
     CameraGeometry,
     Observation,
     Product,
+    Readout,
     Sample,
     SampleParameters,
     SignalSemantics,
@@ -154,17 +156,43 @@ def _geometry(doc: dict, where: str) -> CameraGeometry:
     )
 
 
+def _readout(toml: str, where: str) -> Readout:
+    """Parse sensor readout fields out of a product's camera_config_toml."""
+    try:
+        cfg = tomllib.loads(toml)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{where}: invalid TOML: {e}") from None
+    sensor = _req(cfg, "sensor", where)
+    readout = _req(sensor, "readout", f"{where}.sensor")
+    exposure = _req(sensor, "exposure", f"{where}.sensor")
+    isp = _req(cfg, "isp", where)
+    return Readout(
+        cfa=_req(sensor, "cfa", f"{where}.sensor"),
+        adc_bits=int(_req(readout, "adc_bits", f"{where}.sensor.readout")),
+        black_level_dn=float(_req(readout, "black_level_dn", f"{where}.sensor.readout")),
+        electrons_per_dn=float(_req(readout, "electrons_per_dn", f"{where}.sensor.readout")),
+        exposure_s=float(_req(exposure, "time_s", f"{where}.sensor.exposure")),
+        white_balance=tuple(_req(isp, "white_balance", f"{where}.isp")),
+        device_to_linear_srgb=tuple(_req(isp, "device_to_linear_srgb", f"{where}.isp")),
+    )
+
+
 def _observation(band: Band, doc: dict, where: str) -> Observation:
     prods = _req(doc, "products", where)
     pw = f"{where}.products"
     g = _req(_req(_req(prods, "measurement", pw), "provenance", f"{pw}.measurement"), "geometry", f"{pw}.measurement.provenance")
     geometry = _geometry(g, f"{pw}.measurement.provenance.geometry")
+    config = None
     for name in _SENSOR_PRODUCTS:
-        other = _req(
-            _req(_req(prods, name, pw), "provenance", f"{pw}.{name}"), "geometry", f"{pw}.{name}.provenance"
-        )
-        if other != g:
+        prov = _req(_req(prods, name, pw), "provenance", f"{pw}.{name}")
+        if _req(prov, "geometry", f"{pw}.{name}.provenance") != g:
             raise ValueError(f"{pw}.{name}.provenance.geometry differs from measurement's")
+        cfg = _req(prov, "camera_config_toml", f"{pw}.{name}.provenance")
+        if config is None:
+            config = cfg
+        elif cfg != config:
+            raise ValueError(f"{pw}.{name}.provenance.camera_config_toml differs from measurement's")
+    readout = _readout(config, f"{pw}.measurement.provenance.camera_config_toml")
     products: dict[str, Product] = {}
 
     def add(p: Product) -> None:
@@ -188,6 +216,7 @@ def _observation(band: Band, doc: dict, where: str) -> Observation:
     return Observation(
         band=band,
         geometry=geometry,
+        readout=readout,
         spectral_mode=_req(doc, "spectral_mode", where),
         products=products,
         record=_req(doc, "record", where),

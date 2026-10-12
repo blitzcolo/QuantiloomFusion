@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from quantiloom_fusion.core.bands import Band
-from quantiloom_fusion.dataset import Observation, ThreeBandDataset
+from quantiloom_fusion.dataset import Observation, Readout, ThreeBandDataset
 from quantiloom_fusion.geometry import Warp, oracle_warp, pixel_grid
 from quantiloom_fusion.registration import (
     InfinityHomographyRegistrar,
@@ -23,7 +23,11 @@ DIST = (-0.055, 0.005, 0.0008, -0.0006, 0.0)  # the recipe's lwir lens
 
 
 def make_obs(band, g, record="r"):
-    return Observation(band=band, geometry=g, spectral_mode="m", products={}, record=record)
+    readout = Readout(cfa="mono", adc_bits=14, black_level_dn=0.0, electrons_per_dn=1.0,
+                      exposure_s=0.03, white_balance=(1.0, 1.0, 1.0),
+                      device_to_linear_srgb=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+    return Observation(band=band, geometry=g, readout=readout,
+                       spectral_mode="m", products={}, record=record)
 
 
 def make_warp(map_xy, valid, ref=Band.VIS, src=Band.LWIR):

@@ -10,6 +10,7 @@ from quantiloom_fusion.dataset import (
     Condition,
     Observation,
     Product,
+    Readout,
     Sample,
     SampleParameters,
     SignalSemantics,
@@ -26,6 +27,17 @@ GEO_KWARGS = dict(
     distortion=(-0.055, 0.005, 0.0008, -0.0006, 0.0),
     camera_to_world=IDENTITY16,
     world_to_camera=IDENTITY16,
+)
+
+
+READOUT = Readout(
+    cfa="mono",
+    adc_bits=14,
+    black_level_dn=0.0,
+    electrons_per_dn=1.0,
+    exposure_s=0.03,
+    white_balance=(1.0, 1.0, 1.0),
+    device_to_linear_srgb=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
 )
 
 
@@ -46,6 +58,7 @@ def make_observation(band: Band, mode: str) -> Observation:
     return Observation(
         band=band,
         geometry=CameraGeometry(**GEO_KWARGS),
+        readout=READOUT,
         spectral_mode=mode,
         products=products,
         record="samples/s/records/lwir.json",

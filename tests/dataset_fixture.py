@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quantiloom_fusion.core import jsonio
+from quantiloom_fusion.core import jsonio, tomlio
 from quantiloom_fusion.dataset import exr
 
 IDENTITY16 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
@@ -33,6 +33,21 @@ def _geometry(w: int, h: int) -> dict:
         "pixel_origin": "top_left",
         "world_units_to_meters": 1.0,
     }
+
+
+def _camera_config_toml(band: str) -> str:
+    """camera_config_toml the renderer would echo for this band's sensor."""
+    vis = band == "vis"
+    return tomlio.toml_text({
+        "sensor": {
+            "cfa": "rggb" if vis else "mono",
+            "exposure": {"time_s": 5e-5 if vis else 0.03},
+            "readout": {"adc_bits": 12 if vis else 14, "black_level_dn": 0.0,
+                        "electrons_per_dn": 5.0 if vis else 1.0},
+        },
+        "isp": {"white_balance": [1.0, 1.0, 1.0],
+                "device_to_linear_srgb": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]},
+    })
 
 
 def _signal(kind: str, unit: str, channels: list, cfa: str = "0") -> dict:
@@ -75,7 +90,8 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None) -> Pat
                 write(fname, ["Y"])
                 products[name] = {"path": f"{rel}/{fname}",
                                   "signal": _signal(name, unit, ["Y"]),
-                                  "provenance": {"geometry": geom, "camera_config_toml": "[sensor]\n"},
+                                  "provenance": {"geometry": geom,
+                                                 "camera_config_toml": _camera_config_toml(band)},
                                   "image_metadata": {}}
             write("frame.exr", ["R", "G", "B", "A"])
             products["rendered_reference"] = {"path": f"{rel}/frame.exr",

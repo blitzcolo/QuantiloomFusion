@@ -76,6 +76,27 @@ class CameraGeometry:
 
 
 @dataclass(frozen=True)
+class Readout:
+    """Sensor readout parameters of one observation (camera_config_toml)."""
+
+    cfa: str  # "mono" | "rggb" (sensor.cfa)
+    adc_bits: int
+    black_level_dn: float
+    electrons_per_dn: float
+    exposure_s: float
+    white_balance: tuple[float, float, float]
+    device_to_linear_srgb: tuple[float, ...]  # 9, row-major
+
+    def __post_init__(self) -> None:
+        if len(self.white_balance) != 3:
+            raise ValueError(f"white_balance must have 3 elements, got {len(self.white_balance)}")
+        if len(self.device_to_linear_srgb) != 9:
+            raise ValueError(
+                f"device_to_linear_srgb must have 9 elements, got {len(self.device_to_linear_srgb)}"
+            )
+
+
+@dataclass(frozen=True)
 class SignalSemantics:
     """What the values in a product image mean."""
 
@@ -108,6 +129,7 @@ class Observation:
 
     band: Band
     geometry: CameraGeometry
+    readout: Readout
     spectral_mode: str
     products: Mapping[str, Product]
     record: str

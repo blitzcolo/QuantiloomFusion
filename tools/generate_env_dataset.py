@@ -33,6 +33,10 @@ import uuid
 from contextlib import contextmanager
 from itertools import product
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from quantiloom_fusion.core.host import POSIX
+from quantiloom_fusion.core.paths import canonical_path, is_drive_path, native_path
+
 SCHEMA = "quantiloomfusion.env_dataset"
 VERSION = 1
 BANDS = ("vis", "mwir", "lwir")
@@ -40,46 +44,6 @@ MODES = {"vis": "vis_hero", "mwir": "mwir_fused", "lwir": "lwir_fused"}
 PATH_KEYS = {"gltf", "usd", "file", "basis_file", "materials_json", "solar_lut",
              "forcing_file", "model_pack", "environment_map", "temperature_texture",
              "known_psf_path", "emissive_curve", "spectral_weight_texture"}
-POSIX = os.name == "posix"
-_DRIVE = re.compile(r"^([A-Za-z]):/(.*)$")
-_MOUNT = re.compile(r"^/mnt/([a-zA-Z])/(.*)$")
-
-
-def native_path(value, posix=None):
-    """Config or TOML path as written -> a Path this OS can open.
-
-    On WSL a drive-letter path maps to /mnt/<drive>/; on Windows a /mnt path
-    maps back to the drive. Relative paths pass through unchanged.
-    """
-    if posix is None:
-        posix = POSIX
-    s = str(value).replace("\\", "/")
-    if posix:
-        m = _DRIVE.match(s)
-        if m:
-            s = "/mnt/" + m.group(1).lower() + "/" + m.group(2)
-    else:
-        m = _MOUNT.match(s)
-        if m:
-            s = m.group(1).upper() + ":/" + m.group(2)
-    return Path(s)
-
-
-def canonical_path(p, posix=None):
-    """Form recorded in plans and embedded in job TOMLs.
-
-    A file under a /mnt/<drive>/ mount is recorded with its Windows spelling,
-    so recipe fingerprints and job hashes are identical on Windows and WSL.
-    Other POSIX paths are recorded as-is (they cannot reach the Windows CLI).
-    """
-    if posix is None:
-        posix = POSIX
-    s = Path(p).as_posix()
-    if posix:
-        m = _MOUNT.match(s)
-        if m:
-            return m.group(1).upper() + ":/" + m.group(2)
-    return s
 
 
 def digest(path: Path) -> str:
@@ -595,7 +559,7 @@ def plan(config: Path,out: Path):
                    cli_root/'src'/'libQuantiloom'/'postprocess']
     physics_sources=hashed({p for p in physics_roots if p.is_dir()})
     if POSIX:
-        unreachable=[e['path'] for e in closure if not _DRIVE.match(e['path'])]
+        unreachable=[e['path'] for e in closure if not is_drive_path(e['path'])]
         if unreachable:
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
     version=subprocess.check_output([str(cli),'--version'],text=True).strip()
@@ -823,7 +787,7 @@ def run_dataset(out,plan,args,lease,lock):
         try:import OpenEXR,numpy
         except ImportError as e:raise ValueError('pixel verification requires OpenEXR and numpy; install them or choose verification="hashes"') from e
     cli=native_path(plan['recipe']['settings']['dataset']['cli']).resolve()
-    if POSIX and not _DRIVE.match(canonical_path(out)):
+    if POSIX and not is_drive_path(canonical_path(out)):
         raise ValueError('output directory must be reachable by the Windows CLI; '
                          'on WSL use a path under /mnt/<drive>/')
     captures=0;skipped=0;failed=0;completed=0

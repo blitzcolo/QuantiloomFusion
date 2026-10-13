@@ -8,7 +8,7 @@
 2. 一个任务可以对应多个 commit，但每个 commit 只干一件事；任务编号（`T2.4` 等）只在本文出现，**不要写进 commit message**。
 3. 完成后更新「进度表」「决策记录」「交接备忘」（`progress-update` skill）。
 
-最后更新：2026-10-12
+最后更新：2026-10-13
 
 ---
 
@@ -410,8 +410,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T4.2 | 完成 | `d0cf988`：`OracleRegistrar`、`ResizeRegistrar`、`InfinityHomographyRegistrar`、`registration_error`。pilot 24 样本对 oracle 的 EPE 中位（源像素）：VIS→LWIR resize 1.86 / 无穷远单应 1.16；LWIR→VIS 3.24 / 2.02；VIS→MWIR 2.11 / 1.28；MWIR→LWIR 3.27 / 1.99。VIS→LWIR 单应误差随深度：<5 m 2.55、5–10 m 1.53、10–20 m 0.83、20–50 m 0.39、>50 m 0.20 px（与 f·b/z 一致），58% 的 oracle 有效像素误差 > 1 px（`build/_geom/measure_registrars.py`） |
 | T4.3 | 完成 | 依赖按 paper-exp `uv.lock` 精确钉死（opencv-python-headless 5.0.0.93、scipy 1.18.0/1.17.1、scikit-image 0.26.0）；`fusion/align.py`（`aligned_sources`、`colourize`）与 `fusion/classical.py`（`average`、`max_abs`、`laplacian_pyramid`，移植自 `paper_exp/baselines/classical.py` ab70a3d）。与 paper-exp 双源等价：average/max_abs 逐位一致，laplacian_pyramid 最大差 1.8e-7 |
 | T4.4 | 完成 | `evaluation/{no_reference,source_ref,full_ref}.py` 移植自 paper-exp（no_reference/source_ref @42024cd，full_ref @ab70a3d），源参考指标另有 N 源推广 `*_n`（双源等价已测）；`evaluation/metrics.py` 包装为 `Metric`（EN/SD/SF/AG/SCD/Qabf/MS_SSIM，version=1，评 Y，区域为各波段 support 交集） |
-| T4.5–T4.7 | 未开始 | |
-| T5.0 子集采集 | 进行中 | 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
+| T4.5 | 完成（pilot）；子集运行中 | `2f9b4b0`（`ResultStore`：JSONL、逐行 fsync、尾行撕裂自动修复、目录级单写者锁，复用 `core.locking.runner_lock`）、`151b7b3`（`reference_only` 单波段基线）、`71b1db8`（`experiments`：TOML 配置、变体展开与指纹、按样本推进的可续跑驱动、`summary.csv`、`python -m quantiloom_fusion.experiments run\|summarize`）、`45f440b`（`configs/experiments/{pilot,subset}_baselines.toml`）。pilot：24 样本 × 112 个变体（4 波段集 × display/raw_percentile × oracle/单应/resize × 3 经典方法 × grey/colour，单波段与无 IR 时折叠）= 18912 行、0 错误、1455 s（约 60.6 s/样本，全部是打分：MS_SSIM 约 24 s、Qabf 约 11 s；归一化约 0.05 s，warp ≤ 0.16 s，融合 ≤ 0.03 s）。续跑实测：第二次运行只补缺的 12 行，0.5 s。两侧 213 passed / 11 skipped |
+| T4.6–T4.7 | 未开始 | |
+| T5.0 子集采集 | 完成 | 96/96 COMPLETE、failed=0（`build/env-subset-0.7.4.log`）；`verify --inspect-exr` 尚未跑。以下为启动时的记录： 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 
 ## 7. 决策记录
@@ -438,6 +439,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-12 | 先跑 96 三元组子集，全量随后另开目录 | 用户确认；让阶段 3/4 尽早用上全分辨率真实数据 |
 | 2026-10-12 | VIS 输入 `display` 与线性 RAW 都做、可切换；融合输出彩色与灰度都给 | 用户确认；哪种更好待实验回答。两种输出来自同一次亮度通道融合，指标在 Y 上算以保持可比 |
 | 2026-10-12 | 可选 torch 模块以模块级 `__optional_deps__ = ("torch",)` 声明 | AST 可直接检查；比文件名约定灵活（深度模型可能占整个子目录） |
+| 2026-10-13 | 单波段变体上 SCD/Qabf/MS_SSIM 记为 NaN 行，不进错误重试 | 这些指标至少需要两个源，永远算不出；NaN 是仓库既有的"未定义"约定，否则每次运行退出码都是 1。汇总时 NaN 不计入均值与 n |
+| 2026-10-13 | 方法指纹 = 完整变体 spec（波段集、输入及归一化参数、配准、融合及参数、输出类型）的 sha256 前 16 位；实验名与指标列表不进指纹 | 同一方法在不同实验里可复用已有结果行；改任何影响结果的设置都会换指纹 |
+| 2026-10-13 | 实验目录里的 `config.toml` 副本与输入配置不一致则拒绝运行 | 改配置必须换实验名，避免同一个结果文件里混入不同设置 |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险
@@ -450,6 +454,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 风险：
 
+- **配准对比的评价区域不一致（待修，影响 pilot 结论）**：评价区域是各波段 support 的交集，而 oracle 的有效区（排除边缘与对应不一致像素）比单应/resize 的小，所以三种配准方式是在不同像素集合上打分的。三波段 Qabf 出现 oracle(0.264) < 单应(0.295) 与此一致，不能据此判断配准好坏。修法：所有变体用同一公共评价区域（例如 oracle 有效区与各波段 FOV 的交集）再打分。修好之前，不要引用跨配准方式的指标差。
+- SCD 与 EN 不能用来给配准排序：配准越差，融合图里不相关结构越多，二者反而偏高（pilot：vis+lwir 的 SCD resize 1.061 > oracle 1.056；EN 4.78 vs 4.04）。配准敏感度应主要看 Qabf、MS_SSIM 与 registration_epe。
+- `ResultStore` 复用的锁 helper 其文件名与报错文案仍写"generator"（`.generator.lock`），只是命名不准；`core` 冻结期间不改。
 - 正式运行期间改动 datagen 闭包会使目录无法续跑 → 冻结规则（`AGENTS.md`）。
 - interop 中断可能残留渲染进程 → T2.16。
 - WSL 9p IO 可能拖慢训练数据加载 → T3.9。
@@ -457,5 +464,9 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：阶段 3 的 T3.1–T3.7 与 T4.1–T4.4 完成。子集采集 `build/env-subset-0.7.4` 正在 Windows 上运行（datagen 冻结于 `bbbf3e3`，跑完前不要改 `src/quantiloom_fusion/datagen/` 及其用到的 `core` 模块）。查看进度：`grep -c COMPLETE build/env-subset-0.7.4.log`。
-- 下一步：T4.5 `ResultStore` + `experiments` 驱动，第一次端到端（pilot/子集上「波段子集 × 经典基线 × oracle/单应配准」）；再 T4.6 互补信息量化、T4.7 任务驱动评价。子集跑完后 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。
+- 当前停在：T4.5 完成。pilot 实验结果在 `build/experiments/pilot-baselines/`（`results.jsonl`、`summary.csv`、`variants.json`、`errors.jsonl`）。子集实验已在 Windows 上脱离启动（`configs/experiments/subset_baselines.toml`，约 96 × 60 s ≈ 1.6 小时），输出 `build/experiments/subset-baselines/`，终端日志 `build/_exp/subset-run.log`（输出有缓冲，进度看 `wc -l` 该目录的 `results.jsonl`）。中断了就用同一命令续跑：`cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run python -m quantiloom_fusion.experiments run configs/experiments/subset_baselines.toml"`（cwd 在仓库根）。子集采集已完成，datagen 冻结仍然有效（为正式采集保留）。
+- 下一步（按依赖顺序）：
+  1. 修正配准对比的评价区域（见「待决问题与风险」第一条），升相关 `Metric` 的区域取法并换新的实验名重跑 pilot。
+  2. 子集 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。
+  3. T4.6 互补信息量化（VIS→`truth_surface_temperature` 回归残差、条件互信息 I(Y; LWIR | VIS)），T4.7 任务驱动评价（实例/材质 ID 分割）。
+  4. 打分是耗时大头（MS_SSIM、Qabf 每个变体都重做 `aligned_sources`）；子集 96 样本可接受，扩大变体数之前先缓存对齐结果。

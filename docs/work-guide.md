@@ -454,7 +454,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 风险：
 
-- **配准对比的评价区域不一致（待修，影响 pilot 结论）**：评价区域是各波段 support 的交集，而 oracle 的有效区（排除边缘与对应不一致像素）比单应/resize 的小，所以三种配准方式是在不同像素集合上打分的。三波段 Qabf 出现 oracle(0.264) < 单应(0.295) 与此一致，不能据此判断配准好坏。修法：所有变体用同一公共评价区域（例如 oracle 有效区与各波段 FOV 的交集）再打分。修好之前，不要引用跨配准方式的指标差。
+- **配准对比的评价区域不一致（待修，影响 pilot 结论）**：评价区域是各波段 support 的交集，而 oracle 的有效区（排除边缘与对应不一致像素）比单应/resize 的小，所以三种配准方式很可能是在不同像素集合上打分的（推断，待核实：尚未量化两者 support 的差异；T3.7 只测过 oracle 有效区占比）。三波段 Qabf 出现 oracle(0.264) < 单应(0.295) 与此相符，在核实前不能据此判断配准好坏。修法：所有变体用同一公共评价区域（例如 oracle 有效区与各波段 FOV 的交集）再打分。修好之前，不要引用跨配准方式的指标差。
 - SCD 与 EN 不能用来给配准排序：配准越差，融合图里不相关结构越多，二者反而偏高（pilot：vis+lwir 的 SCD resize 1.061 > oracle 1.056；EN 4.78 vs 4.04）。配准敏感度应主要看 Qabf、MS_SSIM 与 registration_epe。
 - `ResultStore` 复用的锁 helper 其文件名与报错文案仍写"generator"（`.generator.lock`），只是命名不准；`core` 冻结期间不改。
 - 正式运行期间改动 datagen 闭包会使目录无法续跑 → 冻结规则（`AGENTS.md`）。

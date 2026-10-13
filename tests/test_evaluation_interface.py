@@ -30,11 +30,13 @@ def test_result_key_is_frozen():
         key.metric = "other"
 
 
-def test_result_store_stubs(tmp_path):
-    store = ResultStore(tmp_path / "results.jsonl")
-    key = ResultKey("ds", "s1", "fp", "zero", 1)
-    assert store.path == tmp_path / "results.jsonl"
-    with pytest.raises(NotImplementedError):
-        store.has(key)
-    with pytest.raises(NotImplementedError):
+def test_result_store_roundtrip(tmp_path):
+    with ResultStore(tmp_path / "results.jsonl") as store:
+        key = ResultKey("ds", "s1", "fp", "zero", 1)
+        assert store.path == tmp_path / "results.jsonl"
+        assert not store.has(key)
         store.append(key, {"zero": 0.0})
+        assert store.has(key)
+        assert store.get(key) == {"zero": 0.0}
+        with pytest.raises(ValueError, match="duplicate"):
+            store.append(key, {"zero": 1.0})

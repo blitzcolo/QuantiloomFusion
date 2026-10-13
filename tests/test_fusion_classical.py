@@ -53,6 +53,18 @@ def test_needs_registration_rejects_missing_warp():
         create("average").fuse(x)
 
 
+def test_reference_only_passes_the_reference_through():
+    assert "reference_only" in available()
+    ref = np.random.default_rng(1).random((H, W)).astype(np.float32)
+    x = _input({Band.VIS: ref}, {})
+    out = create("reference_only").fuse(x)
+    np.testing.assert_array_equal(out.image, ref)
+    assert out.extras["support"][Band.VIS].all()
+    # It asks for no warps even when other bands are present in the input.
+    x2 = _input({Band.VIS: ref, Band.LWIR: np.zeros((H, W))}, {})
+    np.testing.assert_array_equal(create("reference_only").fuse(x2).image, ref)
+
+
 @pytest.mark.skipif(not PAPER_EXP.exists(), reason="paper-exp checkout not present")
 def test_two_band_equivalence_with_paper_exp():
     rng = np.random.default_rng(42)

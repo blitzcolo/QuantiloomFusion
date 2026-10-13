@@ -2,4 +2,5 @@
 from .align import aligned_sources, colourize
 from .base import Capabilities, FusionInput, FusionMethod, FusionOutput
 from .classical import Average, LaplacianPyramid, MaxAbs
+from .passthrough import ReferenceOnly
 from .registry import available, create, register

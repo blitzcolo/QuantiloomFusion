@@ -1,0 +1,19 @@
+name = "subset-baselines"
+dataset = "build/env-subset-0.7.4"
+reference = "vis"
+band_sets = [["vis"], ["vis", "lwir"], ["vis", "mwir"], ["vis", "mwir", "lwir"]]
+vis_input = ["display", "raw_percentile"]
+ir_input = ["linear"]
+registration = ["oracle", "infinity_homography", "resize"]
+outputs = ["grey", "colour"]
+metrics = ["EN", "SD", "SF", "AG", "SCD", "Qabf", "MS_SSIM"]
+
+[[fusion]]
+name = "average"
+
+[[fusion]]
+name = "max_abs"
+
+[[fusion]]
+name = "laplacian_pyramid"
+levels = 4

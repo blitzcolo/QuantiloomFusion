@@ -109,6 +109,8 @@ NMF RMSE 的物理量级换算：典型 ~0.006 的反射率误差按 ε=1−ρ �
 
 保留场景绑定的大气配置，并新增数据集级 `atmosphere_model_pack` 键把**四个场景统一到同一 NN 模型包**（`H:/Quantiloom-dev/assets/atmos_models`）——大气模型是配方变量，不允许逐场景解析到不同实现；场景之间只保留预设参数差异（urban_haze / turbulent_clear / clear 与各自的 `t_ground_K`、湿度、能见度）。按 `{lwir,mwir,nir,swir,vis} × {ground,slant,sky} × {tau,lpath,ldown}` 组织：路径透射、路径辐射与**天空下行辐射**都由网络给出，LWIR 中 L = εB(T) + (1−ε)L_down 的下行项因此是有模型的，不是常数背景。
 
+**湿度只写一个键**：Quantiloom 0.8 把 `atmosphere.rh`（分数，NN 输入）与 `atmosphere.relative_humidity`（百分数）解析为同一个湿度，两者都给且不一致时告警，并用 `rh` 同时驱动 NN 与热平衡。Qt 白天场景两键并存且不一致（concrete 0.75 对 50 %、desert 0.15 对 50 %、seaside 0.70 对 50 %），生成器在两键并存时只保留 `rh`，任务 TOML 写的就是渲染器实际使用的湿度。数值不变：NN 自 0.7.4 起就读 `rh`，热求解逐行读 forcing CSV 的湿度列（四份 `*_day.csv` 都是含湿度的 8 列格式）。
+
 与渲染的太阳项的组成关系：`L_pixel(λ) = τ_view(λ) × L_surface(λ) + L_path(λ)`——表面照明（太阳直射 + 天空漫射）完全走 `solar_lut` 绑定表，NN 只提供视线透射、路径辐射和热下行。因此 ASTM G173 地表谱**不会被 NN 二次衰减**；代价是 LUT 的直射/漫射配比与 NN 大气状态不严格自洽，属已声明的近似。
 
 NN 包在 CPU 烘焙时以太阳天顶角为输入：天顶角 >85° 判定夜间，太阳散射项整体归零（这正是夜间臂不依赖 `[lighting]` 置零就天然正确的原因——零星空 RGB `sky_radiance` 只作用于解析天空回退，碰不到 NN 的 `ldown`）；天顶角恰在 85° 的掠射太阳求出黄昏级弱路径辐射——月光臂利用的正是这一档。预设表见文末能力清单；`"off"` 移除 `[atmosphere]` 供消融。已知限制：NN 模型包是 MODTRAN 系数据的回归近似，不是在线逐线计算；`sky_model` 标量设置在 NN 激活时被忽略。
@@ -334,7 +336,7 @@ VIS 主渲染显式使用 `vis_hero` 采样波长；物理相机产品通过各�
 
 ## 验证记录
 
-代码测试位于 `tests/test_generate_env_dataset.py`，共 11 项，两个系统下都能跑；其中 2 项需要真实数据集，不设环境变量时自动跳过：
+代码测试位于 `tests/test_generate_env_dataset.py`，共 16 项，两个系统下都能跑；其中 2 项需要真实数据集，不设环境变量时自动跳过：
 
 ```powershell
 python -m unittest discover -s tests -v

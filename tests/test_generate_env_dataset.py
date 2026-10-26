@@ -204,6 +204,14 @@ class PlanningContracts(unittest.TestCase):
         # solar_lut absent from a wholesale-replaced section -> no derived CSV
         self.assertEqual(plan3['scenes'][0]['assumptions']['ir_solar_tail'],'source CSV unchanged')
 
+    def test_one_humidity_key_per_job(self):
+        d={'spp':1,'geometry_truth':False,'atmosphere_mode':'source','thermal_mode':'authored','ir_materials':'constant'}
+        base={'atmosphere':{'preset':'urban_haze','rh':0.75,'relative_humidity':50},'materials':[]}
+        for band in constants.BANDS:
+            self.assertEqual(scene.scene_for_band(base,band,[],d,None)['atmosphere'],{'preset':'urban_haze','rh':0.75})
+        base['atmosphere']={'preset':'clear','relative_humidity':55}
+        self.assertEqual(scene.scene_for_band(base,'lwir',[],d,None)['atmosphere'],{'preset':'clear','relative_humidity':55})
+
     def test_nested_motion_and_duplicate_camera_offsets_rejected(self):
         with self.assertRaisesRegex(ValueError,'model motion'):scene.reject_motion({'models':[{'motion':{'velocity':[1,0,0]}}]})
         self.settings['cameras']['mwir']['offset_rdf_m']=self.settings['cameras']['vis']['offset_rdf_m'];self.save()

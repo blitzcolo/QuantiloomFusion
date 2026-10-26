@@ -97,6 +97,12 @@ def scene_for_band(base,band,materials,d,solar,acq=None):
         # not something each scene may resolve differently. A scene with no
         # [atmosphere] section keeps having none -- a pack is not invented.
         doc["atmosphere"]["model_pack"]=d["atmosphere_model_pack"]
+    atmosphere=doc.get("atmosphere",{})
+    if "rh" in atmosphere and "relative_humidity" in atmosphere:
+        # Quantiloom 0.8 resolves the two keys to one humidity and, given both,
+        # uses rh for the NN and the thermal balance alike; the percentage it
+        # ignores would only misstate the job's air.
+        del atmosphere["relative_humidity"]
     if d["thermal_mode"]=="authored":doc.setdefault("thermal",{})["enabled"]=False
     if solar:doc.setdefault("lighting",{})["solar_lut"]=canonical_path(solar)
     entries={m["name"]:m for m in doc.get("materials",[])}

@@ -447,7 +447,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-13 | 方法指纹 = 完整变体 spec（波段集、输入及归一化参数、配准、融合及参数、输出类型）的 sha256 前 16 位；实验名与指标列表不进指纹 | 同一方法在不同实验里可复用已有结果行；改任何影响结果的设置都会换指纹 |
 | 2026-10-13 | 实验目录里的 `config.toml` 副本与输入配置不一致则拒绝运行 | 改配置必须换实验名，避免同一个结果文件里混入不同设置 |
 | 2026-10-26 | 渲染器迁到 Quantiloom 0.8.3；0.7.4 的数据集保留、只读 | 用户要求。实测 IR 采集快 13–18 倍，近场大气与海水 IR 修正使 `tapp − T_s` 更接近发射率所定的值 |
-| 2026-10-26 | 接受 0.8.x 的新缺省：`sky_distribution = "clear"`、非制冷 LWIR 预设 NETD 带宽 15 Hz；不铉旧值 | 两者都更符合物理（后者让相机真正交付配置声明的 50 mK）；铉 `uniform` 也复现不了 0.7.4 的天空像素 |
+| 2026-10-26 | 接受 0.8.x 的新缺省：`sky_distribution = "clear"`、非制冷 LWIR 预设 NETD 带宽 15 Hz；不钉旧值 | 两者都更符合物理（后者让相机真正交付配置声明的 50 mK）；铉 `uniform` 也复现不了 0.7.4 的天空像素 |
 | 2026-10-26 | 保留 `lighting.atmosphere_temperature_k`（虽然 0.8.3 告警已弃用） | `atmosphere_mode = "off"` 消融臂关闭 NN 大气后，它仍是热天空回退值 |
 | 2026-10-26 | ql_site 实测扫描场景单独成配置 `configs/env_dataset_ql_site.toml`，不并入正式配置 | 用户要求引用它作融合场景。它没有 `[thermal]`（authored 温度）、采样也不同（俯仰 45°、半径 300 m），并入会改变正式配方；大气从源配置的 disabled 覆盖为 NN `clear` 预设（300 m 斜距下 IR 路径项不可忽略） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |

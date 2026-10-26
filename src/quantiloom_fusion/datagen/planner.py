@@ -127,7 +127,10 @@ def plan(config: Path,out: Path,renderer=None):
                 acq=int(fingerprint([d['seed'],'acquisition',identity,band])[:8],16) if d['noise_seed_policy']=='per_acquisition' else None
                 doc=scene_for_band(base,band,materials,d,solar,acq)
                 doc['renderer'].update(resolution=c['resolution'],seed=seed,output='frame.exr')
-                doc['camera']={'position':[p[3],p[7],p[11]],'look_at':[p[3]+p[2],p[7]+p[6],p[11]+p[10]],'up':[-p[1],-p[5],-p[9]],'projection':'perspective','fov_y':c['fov_y_deg']}
+                # The renderer rebuilds the view basis in float32 from
+                # look_at - position; a point one unit ahead loses the basis to
+                # rounding hundreds of units from the origin, so aim at range r.
+                doc['camera']={'position':[p[3],p[7],p[11]],'look_at':[p[3]+r*p[2],p[7]+r*p[6],p[11]+r*p[10]],'up':[-p[1],-p[5],-p[9]],'projection':'perspective','fov_y':c['fov_y_deg']}
                 doc['sensor']=sensor_config(band,c,d,identity)
                 doc['isp']={'auto_exposure':False,'auto_white_balance':False}
                 relative=f'jobs/{identity}/{band}.toml';text=toml_text(doc);texts[relative]=text

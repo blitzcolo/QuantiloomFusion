@@ -204,6 +204,20 @@ class PlanningContracts(unittest.TestCase):
         # solar_lut absent from a wholesale-replaced section -> no derived CSV
         self.assertEqual(plan3['scenes'][0]['assumptions']['ir_solar_tail'],'source CSV unchanged')
 
+    def test_pose_survives_float32_far_from_origin(self):
+        # The renderer rebuilds the view basis in float32 from look_at - position.
+        self.settings['scenes'][0].update(target=[-508.6,-117.6,-406.4],radius_m=600.0);self.save()
+        plan=self.plan()
+        f32=lambda x:struct.unpack('<f',struct.pack('<f',x))[0]
+        for s in plan['samples']:
+            for b in constants.BANDS:
+                camera=tomllib.loads((self.out/s['cameras'][b]['job']).read_text())['camera']
+                d=[f32(f32(l)-f32(p)) for l,p in zip(camera['look_at'],camera['position'])]
+                n=math.sqrt(sum(x*x for x in d))
+                c2w=s['cameras'][b]['camera_to_world']
+                for got,want in zip(d,(c2w[2],c2w[6],c2w[10])):
+                    self.assertLess(abs(got/n-want),2e-6)
+
     def test_one_humidity_key_per_job(self):
         d={'spp':1,'geometry_truth':False,'atmosphere_mode':'source','thermal_mode':'authored','ir_materials':'constant'}
         base={'atmosphere':{'preset':'urban_haze','rh':0.75,'relative_humidity':50},'materials':[]}

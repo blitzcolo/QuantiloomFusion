@@ -336,7 +336,7 @@ VIS 主渲染显式使用 `vis_hero` 采样波长；物理相机产品通过各�
 
 ## 验证记录
 
-代码测试位于 `tests/test_generate_env_dataset.py`，共 16 项，两个系统下都能跑；其中 2 项需要真实数据集，不设环境变量时自动跳过：
+代码测试位于 `tests/test_generate_env_dataset.py`，共 17 项，两个系统下都能跑；其中 2 项需要真实数据集，不设环境变量时自动跳过：
 
 ```powershell
 python -m unittest discover -s tests -v

@@ -26,7 +26,7 @@ cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run pytest -q"
 - 需要 torch 的测试在未装 `torch` extra 时应跳过而非失败；要跑它们加 `--extra torch`（Windows 下载约 2.4 GB）。
 - 默认不跑 `gpu` 标记的测试。要跑：`-m gpu`（需要渲染器与 RTX GPU，且不能和正在进行的正式采集抢 GPU，先查 `tasklist.exe | grep -i quantiloom`）。
 
-基线：两侧都是 `78 passed, 2 skipped`（2026-10-12，uv 0.12.10）；设置 `QUANTILOOM_TEST_DATASET` 指向一次跑完的 smoke 目录时为 `80 passed`。改了依赖后两侧都跑一次 `uv lock --check`。
+基线：两侧都是 `215 passed, 11 skipped`（2026-10-26，uv 0.12.10）；设置 `QUANTILOOM_TEST_DATASET` 指向 `build/env-smoke-0.8.3` 时为 `225 passed, 1 failed`——失败的 `test_real_dataset_single_shared_group` 假设数据集只有一个 `split_group`（pilot 才是），smoke 有 4 组，0.7.4 smoke 上同样失败，是测试的既有假设问题。改了依赖后两侧都跑一次 `uv lock --check`。
 
 ## 真实数据集测试
 
@@ -34,9 +34,9 @@ cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run pytest -q"
 
 ```bash
 # WSL 解释器：变量直接生效
-QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.7.4 <WSL 命令>
+QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.8.3 <WSL 命令>
 # Windows 解释器：必须经 WSLENV 传递，/p 让 interop 翻译路径
-WSLENV=QUANTILOOM_TEST_DATASET/p QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.7.4 <Windows 命令>
+WSLENV=QUANTILOOM_TEST_DATASET/p QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.8.3 <Windows 命令>
 ```
 
 该数据集必须由运行测试的同一 Windows 账户渲染（`attempts/` 有仅创建者可读的 ACL）。没经 `WSLENV` 传过去时测试会被静默跳过——看 skipped 数是否变化来确认确实跑了。

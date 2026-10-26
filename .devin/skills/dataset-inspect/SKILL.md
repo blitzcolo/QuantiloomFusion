@@ -17,7 +17,7 @@ allowed-tools:
 
 ```bash
 cd /mnt/d/QuantiloomFusion
-DS=build/env-pilot-0.7.4          # 数据集根目录
+DS=build/env-smoke-0.8.3          # 数据集根目录
 SAMPLE=                           # 留空 = 第一个完整样本；或填 sample_id
 python3 - "$DS" $SAMPLE <<'EOF'
 import json, pathlib, sys

@@ -9,7 +9,7 @@ allowed-tools:
 
 # smoke 端到端渲染
 
-`configs/env_dataset_smoke.toml`：6 个场景条目（含 1 个夜间、1 个月光变体）各 1 个三元组，共 18 次采集，64×36 分辨率、SPP 1。0.7.4 实测约 4 分钟（`build/env-smoke-0.7.4`）。只验证采集链路，数值不能当质量基准。
+`configs/env_dataset_smoke.toml`：6 个场景条目（含 1 个夜间、1 个月光变体）各 1 个三元组，共 18 次采集，64×36 分辨率、SPP 1。0.8.3 实测约 3 分钟（`build/env-smoke-0.8.3`，热求解缓存已有时；冷缓存加上首次规划的资产哈希约 7 分钟）。只验证采集链路，数值不能当质量基准。
 
 ## 前置检查
 
@@ -43,7 +43,7 @@ python3 tools/generate_env_dataset.py verify --out "$OUT" --inspect-exr
 3. 每 3 个完整三元组会打印一行 `CLOSURE ...`，两侧都必须给出 `closure residual` 残差行；出现 `audit unavailable` 算失败（审计依赖 numpy + OpenEXR，确认运行生成器的解释器装了它们）。
 5. 要中断测试请用真正的 Ctrl+C（前台、带 PTY）。后台 `&` 启动的进程会继承被忽略的 SIGINT，`kill -INT` 对它无效。
 6. 被中断后续跑的目录不要拿来做 `QUANTILOOM_TEST_DATASET`：其中 `attempt-0001` 是中断留下的残骸，导出恢复类测试会失败。用一次跑完的目录。
-4. 抽查一个样本：用 `dataset-inspect` 看各波段产品统计；`samples/<id>/<band>/vNNNN/frame.png` 可直接用 read 工具看（那是理想针孔主渲染，不是相机产品）。夜间样本 VIS rawdn 中位应接近 0，月光样本 VIS rawdn 中位为个位数 DN（0.7.4 smoke 实测 6.0）。
+4. 抽查一个样本：用 `dataset-inspect` 看各波段产品统计；`samples/<id>/<band>/vNNNN/frame.png` 可直接用 read 工具看（那是理想针孔主渲染，不是相机产品）。夜间样本 VIS rawdn 中位应接近 0，月光样本 VIS rawdn 中位为个位数 DN（0.8.3 smoke 实测 5.0，0.7.4 为 6.0）。
 
 ## 汇报
 

@@ -8,7 +8,7 @@
 
 它**不能**单独证明"三波段融合在物理上是必要的"。三波段互补的物理前提是存在 MWIR/LWIR 能提供而 VIS 不能提供的信息：热辐射差异、材料光谱差异、VIS 失效工况。本版本相对此前 `thermal_mode="authored"` + 常数发射率 + 共享噪声流 + 无几何真值的设置做了实质修订（见"物理建模"一节），但结论性断言仍需配套的消融条件（单波段、双波段、`ir_materials="constant"`、夜间臂）在同一协议下对比。把本数据集读成"未配准异构传感器基准 + 初步光谱互补证据"是恰当的；把它读成"三波段必要性已被证明"则不是。
 
-渲染器仍在 0.x 开发期，二进制更新频繁：配方校验按 `Quantiloom.exe --version` 的版本字符串判定，不按可执行文件、SPIR-V 或 DLL 的内容哈希。版本号变化（例如 0.7.3 → 0.7.4）视为新配方，需要新的输出目录；CLI 与其同目录资源仍逐字记录到计划的 `renderer_observed` 中供溯源，但不参与判定。**规则：凡是改变数值结果的修复都必须升版本号**——0.7.3 时代曾把 LWIR 采样缺陷的修复落在同一版本号下，若不升版，按"同版本可续跑"规则修复前后的产品会混入同一数据集；本条自 0.7.4 起强制执行。在此基础上计划指纹另加 `physics_sources`：当 CLI 位于开发构建树（旁边有 `src/`）时，`src/shaders`、`src/libQuantiloom/atmos`、`src/libQuantiloom/postprocess` 三个物理相关目录的逐文件内容哈希参与配方判定——同版本号下改了着色器/大气烘焙/传感器链源码也不能续跑（编译出的 .spv/DLL 本身不门禁，否则每次链接都换指纹）。已验证版本为 **Quantiloom 0.7.4**（在 0.7.3 的几何/温度/材质真值、`dataset.acquisition_index`、LWIR 采样修复之上，本数据集进一步依赖其相机网格 Voronoi 胞盒平均的大气积分语义——0.7.2 及更早版本的 LWIR 相机产品系统性偏低约 10%，0.7.3 的路径项仍有最高约 −23% 的光谱混叠偏差，均见"大气"节；旧版 CLI 无法产出真值产品）。
+渲染器仍在 0.x 开发期，二进制更新频繁：配方校验按 `Quantiloom.exe --version` 的版本字符串判定，不按可执行文件、SPIR-V 或 DLL 的内容哈希。版本号变化（例如 0.7.3 → 0.7.4）视为新配方，需要新的输出目录；CLI 与其同目录资源仍逐字记录到计划的 `renderer_observed` 中供溯源，但不参与判定。**规则：凡是改变数值结果的修复都必须升版本号**——0.7.3 时代曾把 LWIR 采样缺陷的修复落在同一版本号下，若不升版，按"同版本可续跑"规则修复前后的产品会混入同一数据集；本条自 0.7.4 起强制执行。在此基础上计划指纹另加 `physics_sources`：当 CLI 位于开发构建树（旁边有 `src/`）时，`src/shaders`、`src/libQuantiloom/atmos`、`src/libQuantiloom/postprocess` 三个物理相关目录的逐文件内容哈希参与配方判定——同版本号下改了着色器/大气烘焙/传感器链源码也不能续跑（编译出的 .spv/DLL 本身不门禁，否则每次链接都换指纹）。已验证版本为 **Quantiloom 0.8.3**（2026-10-26 迁移；与 0.7.4 的同任务对照见"验证记录"的迁移节，0.7.4 渲染的 `build/env-*-0.7.4` 是另一个配方，只能 `verify`）。最低要求仍是 **0.7.4**（在 0.7.3 的几何/温度/材质真值、`dataset.acquisition_index`、LWIR 采样修复之上，本数据集进一步依赖其相机网格 Voronoi 胞盒平均的大气积分语义——0.7.2 及更早版本的 LWIR 相机产品系统性偏低约 10%，0.7.3 的路径项仍有最高约 −23% 的光谱混叠偏差，均见"大气"节；旧版 CLI 无法产出真值产品）。
 
 生成端需要 CLI 和场景资产。融合端只需分发数据集里的 EXR、JSON 元数据和索引，不需要 Quantiloom 的源码、SDK 或可执行程序。数据集自身的 `verify` 命令同样不读取原始场景，也不调用渲染器。
 
@@ -27,7 +27,7 @@
 
 ## 配置和覆盖范围
 
-正式配置为 `configs/env_dataset.toml`，小样本配置为 `configs/env_dataset_smoke.toml`。小样本配置用于验证采集链路，采用较少采样和较低分辨率，不适合作为论文中的质量基准。另有全分辨率 pilot 配置 `configs/env_dataset_pilot.toml`：相机分辨率、SPP 32、`wavelength_samples = 12` 与物理开关同正式配置，只取 concrete 的白天/夜间/月光三个条目 × 8 个方位角（俯仰 12°、单一距离），共 24 个三波段样本，闭合审计每 8 个三元组一次；用于在正式采集前实测吞吐和检查全分辨率产品（本机 `build/env-pilot-0.7.4` 已完整渲染）。
+正式配置为 `configs/env_dataset.toml`，小样本配置为 `configs/env_dataset_smoke.toml`。小样本配置用于验证采集链路，采用较少采样和较低分辨率，不适合作为论文中的质量基准。另有全分辨率 pilot 配置 `configs/env_dataset_pilot.toml`：相机分辨率、SPP 32、`wavelength_samples = 12` 与物理开关同正式配置，只取 concrete 的白天/夜间/月光三个条目 × 8 个方位角（俯仰 12°、单一距离），共 24 个三波段样本，闭合审计每 8 个三元组一次；用于在正式采集前实测吞吐和检查全分辨率产品（本机 `build/env-pilot-0.7.4` 已在 0.7.4 下完整渲染；`build/env-pilot-0.8.3-asis` 是同一批任务 TOML 在 0.8.3 下的前 3 个三元组，只用于版本对照）。
 
 正式配置覆盖 **12 个场景条目**（4 个白天 + 4 个 `*_night` 夜间变体 + 4 个 `*_moonlight` 低照度变体）、24 个方位角、3 个俯仰角和 3 个距离，共 **2592 个三波段样本、7776 次相机采集**。这是计划规模，脚本不会在创建计划时开始完整渲染；夜间与月光臂共享同一条 23 时热求解轨迹（热缓存使每场景只需两条求解：白天与 23 时）。
 
@@ -167,7 +167,7 @@ smoke 实测（64×36，0.7.4）：月光 VIS rawdn **中位 6.0 DN**（白天�
 
 ## 使用方法
 
-在 `D:/QuantiloomFusion`（Windows）或 `/mnt/d/QuantiloomFusion`（WSL）目录运行。命令在两系统下相同。输出目录以渲染器版本为后缀（如 `build/env-smoke-0.7.4`）；改了相机配置、配方开关或渲染器版本就换一个新目录，旧目录只 `verify`。本机现有的 `build/env-smoke-0.7.4`、`build/env-pilot-0.7.4` 已完整渲染，且规划于 `build/` 迁到 H 盘之前，只能 `verify`，重新试跑请用新目录名：
+在 `D:/QuantiloomFusion`（Windows）或 `/mnt/d/QuantiloomFusion`（WSL）目录运行。命令在两系统下相同。输出目录以渲染器版本为后缀（如 `build/env-smoke-0.8.3`）；改了相机配置、配方开关或渲染器版本就换一个新目录，旧目录只 `verify`。本机现有的 `build/env-smoke-0.7.4`、`build/env-pilot-0.7.4`、`build/env-subset-0.7.4` 由 0.7.4 渲染（前两个还规划于 `build/` 迁到 H 盘之前），`build/env-smoke-0.8.3` 已在 0.8.3 下完整渲染，都只能 `verify`，重新试跑请用新目录名：
 
 ```powershell
 python -m pip install numpy OpenEXR
@@ -178,7 +178,7 @@ python -m pip install numpy OpenEXR
 ```powershell
 python tools/generate_env_dataset.py plan `
   --config configs/env_dataset.toml `
-  --out build/env-three-band-0.7.4
+  --out build/env-three-band-0.8.3
 ```
 
 小样本试跑生成六个场景条目各一组 VIS／MWIR／LWIR（含一个夜间变体和一个低照度变体）：
@@ -186,7 +186,7 @@ python tools/generate_env_dataset.py plan `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset_smoke.toml `
-  --out build/env-smoke-0.7.4
+  --out build/env-smoke-0.8.3-try1
 ```
 
 正式运行及断点续生使用同一条命令：
@@ -194,7 +194,7 @@ python tools/generate_env_dataset.py run `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset.toml `
-  --out build/env-three-band-0.7.4
+  --out build/env-three-band-0.8.3
 ```
 
 限制本次新增采集数、仅选择场景，或失败后继续其他采集：
@@ -202,7 +202,7 @@ python tools/generate_env_dataset.py run `
 ```powershell
 python tools/generate_env_dataset.py run `
   --config configs/env_dataset.toml `
-  --out build/env-three-band-0.7.4 `
+  --out build/env-three-band-0.8.3 `
   --scene concrete --scene seaside `
   --max-captures 6 --keep-going
 ```
@@ -213,7 +213,7 @@ python tools/generate_env_dataset.py run `
 
 ```powershell
 python tools/generate_env_dataset.py verify `
-  --out build/env-three-band-0.7.4 --inspect-exr
+  --out build/env-three-band-0.8.3 --inspect-exr
 ```
 
 不加 `--inspect-exr` 时，仍检查文件哈希、输出完整性和实际相机参数；加上后进一步检查 EXR 尺寸、通道、有限像素及内嵌事务标识。`verify` 只对目录中已存在的样本做一致性校验：**没有渲染的计划目录也能通过验证**（输出 `complete=0`）。判断数据集是否完成须看输出的 `complete` 是否等于 `planned`，或以 `dataset.index.json` 为准。
@@ -345,13 +345,13 @@ python -m unittest discover -s tests -v
 设置 `QUANTILOOM_TEST_DATASET` 后，会进一步使用真实导出测试发布恢复、产品损坏检测、位姿和 FOV 拒绝路径。两点要求：该数据集必须由**运行测试的那个 Windows 账户**渲染（渲染器给 `attempts/` 文件设置仅创建者访问的 ACL，别人渲染的目录会在恢复测试里报 PermissionError）；从 WSL 调 Windows Python 时要经 `WSLENV` 传变量，否则变量到不了 Windows 侧、测试被静默跳过：
 
 ```powershell
-$env:QUANTILOOM_TEST_DATASET = "D:/QuantiloomFusion/build/env-smoke-0.7.4"
+$env:QUANTILOOM_TEST_DATASET = "D:/QuantiloomFusion/build/env-smoke-0.8.3"
 python -m unittest discover -s tests -v
 ```
 
 ```bash
 WSLENV=QUANTILOOM_TEST_DATASET/p \
-QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.7.4 \
+QUANTILOOM_TEST_DATASET=/mnt/d/QuantiloomFusion/build/env-smoke-0.8.3 \
 <windows-python> -m unittest discover -s tests -v
 ```
 
@@ -368,11 +368,37 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 - `dataset.acquisition_index` 逐采集不同并计入 manifest；`per_acquisition` 下同波段 `noise_seed` 恒定（FPN 图样跨帧一致、时域噪声独立，源码级保证由测试锁定）；
 - 新真值产品 `truth_surface_temperature`/`truth_material_id`/`truth_materials.json` 逐采集产出，材质清单含波段等效发射率与发射率模型来源。
 
-早期 QA 结果另存于 `build/env-dataset-generation-evidence-2026-10-06.json`（`build/` 不入库，仅本机可见），记录的是 Quantiloom 0.7.0 时代的计划与渲染，属历史证据，不代表当前 0.7.4 二进制；修复前 0.7.3 构建下的 smoke 目录以及更早的 `env-three-band-ready`、`env-smoke-ready` 等旧目录已封存于 `build/_archive-0.7.3-buggy/`，其配方与现版本不兼容，不能直接续跑。
+早期 QA 结果另存于 `build/env-dataset-generation-evidence-2026-10-06.json`（`build/` 不入库，仅本机可见），记录的是 Quantiloom 0.7.0 时代的计划与渲染，属历史证据，不代表当前二进制；修复前 0.7.3 构建下的 smoke 目录以及更早的 `env-three-band-ready`、`env-smoke-ready` 等旧目录已封存于 `build/_archive-0.7.3-buggy/`，其配方与现版本不兼容，不能直接续跑。
+
+### 0.7.4 → 0.8.3 迁移对照（2026-10-26）
+
+同一份任务 TOML、同一组种子分别由两个版本渲染（用迁移前的生成器规划，生成器改动不混入）：smoke `build/env-smoke-0.7.4` 对 `build/env-smoke-0.8.3-asis`（6 个三元组），pilot `build/env-pilot-0.7.4` 对 `build/env-pilot-0.8.3-asis`（concrete a000–a002 三个三元组）。耗时取各采集 `render.log` 首末时间戳（只计渲染器）；像素差按 `truth_validity` 分地物/天空，按 `truth_materials.json` 的 `material_id` 分材质。
+
+| 单次采集耗时 | 0.7.4 | 0.8.3 |
+| --- | --- | --- |
+| pilot VIS（640×360，SPP 32，12 个波长样本） | 25.1–25.5 s | 24.7–25.2 s |
+| pilot MWIR（320×256） | 132–133 s | 9.7–9.9 s |
+| pilot LWIR（256×192） | 155 s | 8.6–8.9 s |
+| pilot 三元组合计 | 约 5.2 分钟 | 约 43 s |
+| smoke 中位 VIS / MWIR / LWIR（热缓存未命中） | 11.6 / 17.1 / 11.5 s | 11.3 / 20.1 / 8.2 s |
+
+- **速度**：全分辨率 IR 采集快 13–18 倍，VIS 不变。0.7.4 的 IR 日志在主渲染 EXR 写出后有一段约 144 s 无输出的相机仿真阶段，0.8.3 中消失；归属哪个提交待核实（候选 `0b58383` 只动太阳方位角时不重烘大气 LUT、`8df3da8` 换波长时就地刷新材质缓冲、`0d11799` 查找表就地追加、`98aca37` 相机大气缓冲只分配一次）。按 pilot 外推，正式配置 2592 个三元组约 31 GPU 小时（此前估算 264 小时；同样假设各场景耗时与 concrete 相近，待核实）。
+- **几何真值不变**：smoke 18 次采集的 `truth_validity` 逐像素相同。`truth_surface_temperature`（热求解）smoke 中位变化 ≤0.2 K；pilot 混凝土 ≤0.03 K，车/房/人材质 −0.25…−0.56 K（99 分位最大 5.7 K）——长波半隐式、灰体辐射度交换、互易视角因子三处求解器修正的合力。
+- **近场大气**（`21f5849`）：50 m 以内的视线不再按 NN LUT 的 50 m 下限计算透射与路径辐射。本数据集相机距目标 5–40 m，0.7.4 多算了大气遮蔽：MWIR 白天 `tapp − T_s` 混凝土地面 −2.87 → −0.67 K、混凝土块 −2.91 → −0.01 K、墙 −0.46 → 0.00 K（pilot concrete_a001）；LWIR 地物 `tapp` 中位 +0.06…+0.33 K。
+- **海水**：SeaWater（纯水 n,k，LWIR ε≈0.99）的 LWIR `tapp − T_s` −7.56 → −0.67 K，MWIR −4.98 → −0.59 K（smoke seaside）。0.7.4 的海面表观温度系统性偏低约 7 K；归因于 `03da7eb` 的 IR 透射修复是推断，待核实。
+- **天空**：VIS 天空像素 rawdn 下降 45–92 DN（concrete/desert/grassland 与 pilot），seaside +16 DN，地物只变 +1…+5 DN。原因是 `lighting.sky_distribution` 缺省改为 `clear`（`867f488`），以及主光线未命中改为经 NN 大气合成（`35b716f`、`e660d84`）。没有配置键能复现 0.7.4 的天空像素；`sky_distribution = "uniform"` 只恢复穹顶分布。本数据集接受 `clear`。
+- **低发射率镜面**（Al 车身，ε≈0.05）反射的环境变冷：LWIR `tapp − T_s` 白天 −5.7 → −7.2 K，夜间 −5.7 → −8.8 K（推断来自下视未命中改取地平线天空 `0fb3e03` 与天空合成变化，待核实）。
+- **LWIR 噪声**：`generic_uncooled_thermal_ir` 预设的 NETD 参考带宽 30 → 15 Hz（`d264a71`；生效相机配置 `netd_noise_bandwidth_hz` 实测 30 → 15）。读出带宽是 1/(2×1/30 s) = 15 Hz，0.7.4 实际交付约 35 mK 而不是配置声明的 50 mK；0.8.3 交付 50 mK，LWIR 时域噪声 σ 约 ×1.41。本数据集接受新值。
+- **闭合审计**：grassland 残差 mean +0.089 → +0.027 K，rms 6.80 → 6.49 K。
+- **契约不变**：导出记录 schema v1、EXR 通道名、真值产品、`replay.toml`、`--version` 格式与 CLI 参数均不变；产品溯源多了 `sky_distribution` 与 `sky_aerosol_optical_depth_500nm` 两个键。两个版本的 smoke 都通过 `verify --inspect-exr`（complete=6/6），消费端读取器在 0.8.3 smoke 上的真实数据集测试通过。
+- **热缓存**：键 schema 4 → 7 且含版本号，0.7.4 的缓存条目不会再命中，可以删除。
+- **生成器随之改动的两处**：只写一个湿度键（见"大气"节；修改前后的 0.8.3 smoke 有 84 个产品逐像素一致）；`look_at` 放在相机组到目标的距离上。渲染器用 float32 从 `look_at − position` 重建视线基，前视点只在 1 m 外时，离原点数百米的场景（ql_site）会丢失约 2e-5 的方向精度，被位姿校验拒绝（`build/env-qlsite-0.8.3` 即此失败）；env 场景的视线方向变化 ≤1.5e-8 rad。
+- **0.8.x 可用而未用的新键**：`camera.view_up`（正下视时指定画面朝向）、`lighting.sky_aerosol_optical_depth`、`thermal.sky_temperature_k`。
+- 0.8.3 smoke（`build/env-smoke-0.8.3`，生成器 `f2b5a22`）：约 3 分钟（热缓存已热），`verify --inspect-exr` complete=6/6；月光 VIS rawdn 中位 5.0 DN（0.7.4：6.0），夜间 0。
 
 ## 附：Quantiloom 能力清单
 
-面向无源码访问的读者。状态标记：**使用中**=本数据集用到；**可用**=CLI/配置可启用而本数据集未用；**条件**=需特定输入/实验特性；**无**=该路径下不产出。版本基准：Quantiloom 0.7.4。
+面向无源码访问的读者。状态标记：**使用中**=本数据集用到；**可用**=CLI/配置可启用而本数据集未用；**条件**=需特定输入/实验特性；**无**=该路径下不产出。版本基准：Quantiloom 0.8.3。
 
 ### 光谱与渲染
 
@@ -406,7 +432,7 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 | solved 热场 | 表面能量平衡求解：逐材质热导率/密度/比热/厚度/对流/短波吸收/湿度因子，8 层壳，时间步进 + 视角因子辐射交换 | 使用中 |
 | forcing | CSV 气象日（直射/散射/气温/风/湿度）驱动 | 使用中（4 份场景文件） |
 | 内边界 | `interior_bc = "fixed"` + `interior_temperature_k`：固定温度内核（代谢/热源近似） | 使用中（人物材质 310 K 核心） |
-| 热缓存 | 求解按输入哈希落盘复用（`QUANTILOOM_THERMAL_CACHE=0` 关闭） | 使用中 |
+| 热缓存 | 求解按输入哈希落盘复用（`QUANTILOOM_THERMAL_CACHE=0` 关闭）；0.8.3 的键含版本号（schema 7），跨版本不复用 | 使用中 |
 | 几何历元 | 运动场景按分段静态区间分别求解 | 本数据集禁用运动场景 |
 | timeline | `sequence` 命令在单一渲染器上推进时钟 | 可用未用 |
 
@@ -422,6 +448,8 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 | 太阳谱 LUT | `solar_lut` 绑定测量表（ASTM G173 等），含直射/全球列；直射与漫射不被 NN 二次衰减 | 使用中 + planck_tail 派生 + `solar_scale` 缩放（月光臂） |
 | QLTrans | MODTRAN 封装工具：太阳/天空/透射表、波长范围与步长、大气模型与天气、太阳天顶角扫描 | **条件**：内嵌 MODTRAN4 但缺分子带 DATA 文件，当前检出不可算 |
 | sky_model | isotropic / clear_sky 等解析天空 | NN 激活时被忽略 |
+| 天空分布 | `lighting.sky_distribution`：`clear` 按晴空大气分布漫射天空（半球辐照度不变），`uniform` 是 0.8.2 之前的均匀穹顶；只作用于 VIS/单波长天空（0.8.2 新增） | 使用中（缺省 `clear`） |
+| 天底视角 | `camera.view_up`：`look_at` 与 `up` 共线（正下视）时指定画面朝向（0.8.2 新增） | 可用未用（俯仰 <80°，不会共线） |
 
 ### 传感器与相机
 

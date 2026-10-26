@@ -1,0 +1,113 @@
+# Real-scan fusion scene: the DJI Terra LiDAR + photogrammetry mesh of a rural
+# site near Weichang, Hebei (flight 2026-08-27 14:19 +08), converted for
+# Quantiloom by terra2ql (H:/LidarPointCloud). Only the geometry and the RGB
+# photo atlases are measured. Surface classes come mostly from automatic rules,
+# their spectra from the merged ECOSTRESS/SLUM library, and the per-class
+# ir_temperature_k from terra2ql's steady-state energy balance under
+# climatological weather (air 26 C, RH 55 %, wind 2 m/s): the infrared is
+# simulated, not measured. See docs/env-dataset-generation.md.
+#
+# Fixed camera profiles are the formal configuration's; use a new --out after
+# any change.
+
+[dataset]
+name = "ql_site_fusion_v1"
+qt_root = "H:/Quantiloom-Qt"
+cli = "H:/Quantiloom-dev/build/src/app/Release/Quantiloom.exe"
+seed = 20261026
+spp = 32
+wavelength_samples = 12
+# The site has no [thermal] section: 11.8 M triangles are too many solver
+# elements, so its authored per-class temperatures are the temperature field.
+thermal_mode = "authored"
+atmosphere_mode = "source"
+atmosphere_model_pack = "H:/Quantiloom-dev/assets/atmos_models"
+# The site's ASTM G-173 table ends at 4 um; the Planck tail covers MWIR/LWIR.
+solar_ir_policy = "planck_tail"
+ir_materials = "spectral"
+noise_seed_policy = "per_acquisition"
+geometry_truth = true
+verification = "pixels"
+closure_audit_every = 4
+
+[sampling]
+azimuths_deg = [0, 45, 90, 135, 180, 225, 270, 315]
+# At 45 deg the top edge of the widest (VIS) frame still lands on the mesh,
+# which spans about 1 km; lower views look past its edge.
+elevations_deg = [45]
+radius_scales = [1.0]
+repeats = 1
+
+# site.mwir.toml binds the merged library, the only one that covers VIS to
+# LWIR; site.vis_hero.toml's USGS curves stop at 2.5 um.
+[[scenes]]
+id = "ql_site"
+config = "H:/LidarPointCloud/out/ql_site/site.mwir.toml"
+# The site camera's look-at point, on the ground near the mesh centre.
+target = [-508.624, -117.589, -406.428]
+radius_m = 300.0
+
+# The site config disables the atmosphere. At 300 m slant range the infrared
+# path is not negligible, so the dataset's NN pack runs the rural "clear"
+# preset with the site's weather. One humidity key: 0.8.x reads atmosphere.rh
+# for both the NN and the thermal balance.
+[scenes.overrides.atmosphere]
+preset = "clear"
+air_temperature_k = 299.15
+t_ground_K = 299.15
+rh = 0.55
+
+[cameras.vis]
+resolution = [640, 360]
+fov_y_deg = 45.0
+pixel_pitch_um = 5.0
+f_number = 4.0
+exposure_s = 5e-05
+offset_rdf_m = [0.0, 0.0, 0.0]
+rotation_ypr_deg = [0.0, 0.0, 0.0]
+psf_sigma_px = 0.45
+read_noise_e_rms = 3.0
+prnu_sigma = 0.005
+dsnu_e_rms = 0.5
+full_well_e = 20000.0
+electrons_per_dn = 5.0
+adc_bits = 12
+warmup_s = 0.0
+distortion = [-0.01, 0.001, 0.0002, -0.0001, 0.0]
+noise_free = false
+
+[cameras.mwir]
+resolution = [320, 256]
+fov_y_deg = 38.0
+pixel_pitch_um = 15.0
+f_number = 2.5
+exposure_s = 0.00015
+offset_rdf_m = [0.035, 0.002, 0.008]
+rotation_ypr_deg = [0.12, -0.08, 0.03]
+psf_sigma_px = 0.8
+read_noise_e_rms = 250.0
+prnu_sigma = 0.01
+dsnu_e_rms = 8.0
+full_well_e = 1000000.0
+electrons_per_dn = 122.0
+adc_bits = 14
+warmup_s = 0.0
+distortion = [-0.035, 0.003, -0.0003, 0.0005, 0.0]
+noise_free = false
+
+[cameras.lwir]
+resolution = [256, 192]
+fov_y_deg = 42.0
+pixel_pitch_um = 12.0
+f_number = 1.4
+exposure_s = 0.03
+offset_rdf_m = [-0.045, -0.003, 0.012]
+rotation_ypr_deg = [-0.15, 0.1, -0.04]
+psf_sigma_px = 1.1
+netd_k = 0.05
+responsivity_dn_w = 1000000000000.0
+time_constant_s = 0.012
+adc_bits = 14
+warmup_s = 0.06
+distortion = [-0.055, 0.005, 0.0008, -0.0006, 0.0]
+noise_free = false

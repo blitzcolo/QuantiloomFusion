@@ -165,6 +165,23 @@ smoke 实测（64×36，0.7.4）：月光 VIS rawdn **中位 6.0 DN**（白天�
 
 需要注意：月光臂的太阳表仍是 `planck_tail` 近似再乘 2e-6，NN 散射缩放是"散射 ∝ 源辐照度"的一阶近似——VIS 的量级是对的，但不应被解释成"有月光的精确光谱"。
 
+### 实测扫描场景（`configs/env_dataset_ql_site.toml`）
+
+融合用的真实地形场景：terra2ql（`H:/LidarPointCloud`）把 DJI Terra 5.3.5 的 LiDAR + 摄影测量网格转成 Quantiloom 场景，放在 `H:/LidarPointCloud/out/ql_site`。场地在河北围场附近，约 1 km × 1 km、11,843,651 个三角形，航飞时间 2026-08-27 14:19 +08。配置直接引用 `site.mwir.toml`。
+
+**哪些是实测、哪些是模拟**：只有网格几何与 RGB 照片纹理是实测的，而本数据集只渲染场景的 `spectral` 变体（逐类材质、无纹理），照片纹理不进入渲染。地物类别约 88 % 面积来自自动规则、约 12 % 手工标注；每类光谱取自 ECOSTRESS/SLUM 合并库（玉米、车漆等是替代或占位条目）；每类 `ir_temperature_k` 由 terra2ql 的 `scripts/band_tomls.py` 按稳态能量平衡算出，气象取气候平均（气温 26 °C、RH 55 %、风速 2 m/s、河水 23 °C）而不是实测。红外图像全部由 Quantiloom 渲染；Terra 工程只含 LiDAR 与 RGB 航摄，没有实测红外数据。
+
+与 env 场景的差异：
+
+- `thermal_mode = "authored"`：场景没有 `[thermal]`（千万级三角形做求解元太慢），每类一个温度，阴影与受照面同温，IR 中的阴影只来自被挡住的反射太阳光。
+- 大气：源配置 `preset = "disabled"`。300 m 斜距下 IR 路径项不可忽略，配置用 `overrides.atmosphere` 改为数据集 NN 包的 `clear` 预设（乡村气溶、能见度 23 km），气温/地温 299.15 K、`rh = 0.55` 取场地气象。
+- 太阳谱：`planck_tail` 把 ASTM G173 延伸到 4 µm 以外，取代源配置在 4–5 µm 的端点钳制。
+- VIS 用合并库曲线：源 `site.vis_hero.toml` 的 USGS 曲线只到 2.5 µm，不能跨三个波段共用一份材质表。河水的 VIS 因此是清水曲线（Tap water），比浑浊的真实河水暗。
+- 采样：环绕源相机的注视点 `[-508.624, -117.589, -406.428]`，8 个方位 × 俯仰 45° × 半径 300 m。俯仰更低时 VIS 画面上沿会越过网格边界。三款相机配置与正式配置相同，包括 VIS 曝光 5e-5 s。
+- glTF 的 74 个 `terra_photo_*` 材质在 IR 任务里得到缺省 `ir_emissivity = 0.9` 条目，但 `spectral` 变体不使用它们。只有一个 glTF，全部样本同属一个 `split_group`。
+
+实测（Quantiloom 0.8.3，`build/env-qlsite-0.8.3-r2`）：8/8 个三元组一次跑完，单次采集中位 VIS 21.6 s、MWIR 14.4 s、LWIR 13.3 s（含场景加载）。`truth_validity` 未命中像素最多 7/230400（VIS）。有效像素 `truth_surface_temperature` 296.1–326.5 K，`tapp` 1–99 分位 MWIR 302.4–320.3 K、LWIR 300.7–322.1 K。300 m 的大气路径把表观温度拉向气温：例如 a000 的 LWIR `tapp − T_s` 河水（296 K）+3.2 K、涂层钢板屋顶（327 K）−4.9 K、玉米（304 K）−0.9 K。VIS rawdn 中位 57–61 DN（与 concrete 白天同量级），无饱和。闭合审计 a003：mean −0.107 K、rms 2.01 K；a007：mean −0.051 K、rms 1.81 K（env 场景 rms 约 6.5 K）。首次尝试 `build/env-qlsite-0.8.3` 规划于 `look_at` 修复之前，MWIR 被位姿校验拒绝（见迁移节），只作证据保留。
+
 ## 使用方法
 
 在 `D:/QuantiloomFusion`（Windows）或 `/mnt/d/QuantiloomFusion`（WSL）目录运行。命令在两系统下相同。输出目录以渲染器版本为后缀（如 `build/env-smoke-0.8.3`）；改了相机配置、配方开关或渲染器版本就换一个新目录，旧目录只 `verify`。本机现有的 `build/env-smoke-0.7.4`、`build/env-pilot-0.7.4`、`build/env-subset-0.7.4` 由 0.7.4 渲染（前两个还规划于 `build/` 迁到 H 盘之前），`build/env-smoke-0.8.3` 已在 0.8.3 下完整渲染，都只能 `verify`，重新试跑请用新目录名：

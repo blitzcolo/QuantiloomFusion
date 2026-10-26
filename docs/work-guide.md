@@ -8,7 +8,7 @@
 2. 一个任务可以对应多个 commit，但每个 commit 只干一件事；任务编号（`T2.4` 等）只在本文出现，**不要写进 commit message**。
 3. 完成后更新「进度表」「决策记录」「交接备忘」（`progress-update` skill）。
 
-最后更新：2026-10-13
+最后更新：2026-10-26
 
 ---
 
@@ -20,7 +20,7 @@
 
 | 编号 | 目标 | 交付物 |
 | --- | --- | --- |
-| G1 | 受控基准数据集：正式配置 2592 个三波段样本 / 7776 次采集，可断点续跑、可在 Windows 与 WSL 间交替执行、可独立校验 | `build/env-three-band-0.7.4/`（不入库）+ 发布清单 |
+| G1 | 受控基准数据集：正式配置 2592 个三波段样本 / 7776 次采集，可断点续跑、可在 Windows 与 WSL 间交替执行、可独立校验 | `build/env-three-band-0.8.3/`（不入库）+ 发布清单 |
 | G2 | 消费端数据读取：不依赖 Quantiloom 即可类型化地读取产品、信号语义、相机几何、真值 | `quantiloom_fusion.dataset` |
 | G3 | 几何与配准：用真值深度 + 位姿 + 内参 + 畸变做 oracle 重投影与双向遮挡；配准方法接口与误差度量 | `geometry`、`registration` |
 | G4 | 融合：N 波段融合方法接口、注册表、经典基线、未配准深度基线适配 | `fusion` |
@@ -45,8 +45,8 @@
 | `tests/test_generate_env_dataset.py` | 11 项（9 项契约 + 2 项需真实数据集，默认跳过），WSL Python 3.13.9 与 Windows Python 3.13.3 均通过 | `python -m unittest discover -s tests`，两侧均 `Ran 11 tests ... OK (skipped=2)` |
 | 配置 | `configs/env_dataset.toml`（正式）、`env_dataset_pilot.toml`（全分辨率 pilot）、`env_dataset_smoke.toml`（64×36 smoke） | 文件 |
 | 审计工具 | `tools/_closure_audit.py`、`_mask_audit.py`、`_spectral_integration_audit.py` | 文件 |
-| 渲染器 | `Quantiloom 0.7.4`，RTX 4060 Ti 8 GB | `Quantiloom.exe --version`、`nvidia-smi` |
-| smoke 数据集 | `build/env-smoke-0.7.4`：6/6 完整，18 次采集约 4 分钟 | `dataset.index.json`、render.log 时间戳 |
+| 渲染器 | `Quantiloom 0.8.3`（2026-10-26 起；此前 0.7.4），RTX 4060 Ti 8 GB，驱动 617.42 | `Quantiloom.exe --version`、`nvidia-smi` |
+| smoke 数据集 | `build/env-smoke-0.7.4`：6/6 完整，18 次采集约 4 分钟；`build/env-smoke-0.8.3`（0.8.3，生成器 `f2b5a22`）：6/6 完整，约 3 分钟 | `dataset.index.json`、render.log 时间戳 |
 | pilot 数据集 | `build/env-pilot-0.7.4`：24/24 完整（concrete 白天/夜间/月光 × 8 方位），samples 304 MB + attempts 624 MB | 同上 |
 | 场景资产 | `H:/Quantiloom-Qt/assets/configs/env_{concrete,desert,grassland,seaside}.toml` | 文件 |
 | `src/`、`paper/`、`assets/` | 空目录 | `ls` |
@@ -54,7 +54,7 @@
 
 ### 2.2 实测吞吐（决定正式采集的排期）
 
-pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**；样本约 33 GB，attempts 约 67 GB（`build/` 在 H 盘，剩余约 1.1 TB，见 §2.4）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。
+pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**——这是 0.7.4 的数。**0.8.3**（2026-10-26，同一批任务 TOML 的前 3 个三元组，`build/env-pilot-0.8.3-asis`）：VIS 25 s、MWIR 9.8 s、LWIR 8.8 s，三元组约 43 s，外推正式配置约 **31 GPU 小时**（待核实：同样假设各场景耗时与 concrete 相近）；样本约 33 GB，attempts 约 67 GB（`build/` 在 H 盘，剩余约 1.1 TB，见 §2.4）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。
 
 ### 2.3 环境
 
@@ -94,6 +94,8 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 7. ~~`.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置，与本仓库无关。~~ 已加入 `.gitignore`（`460a57a`）。
 8. ~~**跨系统重规划失败**（T2.15 发现，重构前就存在）：Windows 与 Linux libm 末位差异使正式配置 549 个任务 TOML 在另一系统上逐字节不同，`plan` 报 "planned file changed"，正式数据集无法跨系统续跑。~~ 已由 `aa07475` 修正：同 `dataset_id` 重规划时保留已存计划与任务文件，容差比对。
 9. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
+10. 场景待核实：Qt 白天场景的 NN 湿度与其 forcing 不一致——concrete `rh = 0.75`（urban_haze 预设值）而 `concrete_day.csv` 14 时湿度 30.4 %；desert 0.15 对 7.3 %、seaside 0.70 对 68.3 %。热求解读 forcing 的湿度列，只有 NN 大气用 `rh`，所以大气与热平衡描述的不是同一团空气。场景文件属 Quantiloom-Qt，本仓库不改；要统一，可在配置的 `overrides.atmosphere` 里写全白天大气段（改配方，需用户决定）。
+11. `tests/test_dataset_splits.py::test_real_dataset_single_shared_group` 假设 `QUANTILOOM_TEST_DATASET` 只有一个 `split_group`（pilot），而文档与 skill 指定的测试数据集是 smoke（4 组）：用 `build/env-smoke-0.8.3` 与 `build/env-smoke-0.7.4` 都失败（`assert 4 == 1`）。是测试的既有假设问题，与 0.8.3 无关，待修。
 
 ---
 
@@ -150,7 +152,7 @@ class RenderProcess(Protocol):
     def terminate(self, timeout_s: float = 10.0) -> None: ...
 
 class Renderer(Protocol):
-    def version(self) -> str: ...                      # "Quantiloom 0.7.4"，配方判定用
+    def version(self) -> str: ...                      # "Quantiloom 0.8.3"，配方判定用
     def start(self, job_toml: Path, workdir: Path, log: IO[str]) -> RenderProcess: ...
 
 class QuantiloomCli(Renderer): ...   # Windows 原生直接调用；WSL 经 interop，参数传 canonical（Windows）路径
@@ -366,7 +368,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ### 阶段 5：正式采集与消融渲染（GPU 长任务）
 
-- **T5.1** 冻结 datagen（记录冻结时的 commit），正式运行 `configs/env_dataset.toml` → `build/env-three-band-0.7.4`；定期 `verify`；每 50 个三元组的闭合审计结果汇总进本文。
+- **T5.1** 冻结 datagen（记录冻结时的 commit），正式运行 `configs/env_dataset.toml` → `build/env-three-band-0.8.3`；定期 `verify`；每 50 个三元组的闭合审计结果汇总进本文。
 - **T5.2** 消融臂配置：`ir_materials="constant"`、`thermal_mode="authored"`，在 1 个俯仰角 × 8 个方位角子集上（配置内容需用户确认）。
 - **T5.3** 可选：同 `job_sha256` 的 VIS 采集跨消融臂复用（VIS 任务 TOML 在这两个开关下逐字节一致）。
 - **T5.4** 发布打包（index、plan、state、samples）；按 Datasheets for Datasets 拆分数据集文档。
@@ -414,6 +416,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T4.6–T4.7 | 未开始 | |
 | T5.0 子集采集 | 完成 | 96/96 COMPLETE、failed=0（`build/env-subset-0.7.4.log`）；`verify --inspect-exr` 尚未跑。以下为启动时的记录： 用户选择先跑子集：`configs/env_dataset_subset.toml`（`bbbf3e3`；与正式配置只差名称、`closure_audit_every=12` 与采样：12 个场景条目 × 8 方位 × 俯仰 12° × 半径 1.0 = 96 个三元组）。2026-10-12 起在 Windows 原生进程中运行（`.venv-win` 的 python，`Start-Process` 脱离 WSL），输出 `build/env-subset-0.7.4`，日志 `build/env-subset-0.7.4.log`/`.err`。按 pilot 吞吐估约 10 小时、约 3.7 GB。**运行期间 datagen 冻结于 `bbbf3e3`** |
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
+| 迁移到 Quantiloom 0.8.3 | 完成 | 同一批任务 TOML 与种子分别用 0.7.4、0.8.3 渲染对照（smoke 6 个三元组、pilot 前 3 个），结果见数据集文档"0.7.4 → 0.8.3 迁移对照"。生成器两处修复：只写一个湿度键（`f2b5a22`，0.8.3 smoke 84 个产品与修复前逐像素一致，告警 9 → 0）；`look_at` 放在相机组到目标的距离上（`fa0ea21`，ql_site 首次渲染因 float32 位姿精度被校验拒绝后发现）。文档与 skill 的版本、目录与基线数 `f0a79a9`。`build/env-smoke-0.8.3` 两侧 `verify --inspect-exr` complete=6/6；两侧 `215 passed, 11 skipped`，带真实数据集 `225 passed, 1 failed`（既有问题，见 §2.5 第 11 条） |
+| ql_site 实测扫描场景 | 完成 | `10b0e68` `configs/env_dataset_ql_site.toml`：引用 `H:/LidarPointCloud/out/ql_site/site.mwir.toml`，authored 温度、NN `clear` 大气、8 方位 × 45° × 300 m。`build/env-qlsite-0.8.3-r2` 一次跑完 8/8（7 分 50 秒），`verify --inspect-exr` complete=8/8；闭合审计 rms 2.0/1.8 K。红外是模拟的（只有网格与照片纹理实测），见数据集文档对应小节 |
 
 ## 7. 决策记录
 
@@ -442,13 +446,19 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-13 | 单波段变体上 SCD/Qabf/MS_SSIM 记为 NaN 行，不进错误重试 | 这些指标至少需要两个源，永远算不出；NaN 是仓库既有的"未定义"约定，否则每次运行退出码都是 1。汇总时 NaN 不计入均值与 n |
 | 2026-10-13 | 方法指纹 = 完整变体 spec（波段集、输入及归一化参数、配准、融合及参数、输出类型）的 sha256 前 16 位；实验名与指标列表不进指纹 | 同一方法在不同实验里可复用已有结果行；改任何影响结果的设置都会换指纹 |
 | 2026-10-13 | 实验目录里的 `config.toml` 副本与输入配置不一致则拒绝运行 | 改配置必须换实验名，避免同一个结果文件里混入不同设置 |
+| 2026-10-26 | 渲染器迁到 Quantiloom 0.8.3；0.7.4 的数据集保留、只读 | 用户要求。实测 IR 采集快 13–18 倍，近场大气与海水 IR 修正使 `tapp − T_s` 更接近发射率所定的值 |
+| 2026-10-26 | 接受 0.8.x 的新缺省：`sky_distribution = "clear"`、非制冷 LWIR 预设 NETD 带宽 15 Hz；不铉旧值 | 两者都更符合物理（后者让相机真正交付配置声明的 50 mK）；铉 `uniform` 也复现不了 0.7.4 的天空像素 |
+| 2026-10-26 | 保留 `lighting.atmosphere_temperature_k`（虽然 0.8.3 告警已弃用） | `atmosphere_mode = "off"` 消融臂关闭 NN 大气后，它仍是热天空回退值 |
+| 2026-10-26 | ql_site 实测扫描场景单独成配置 `configs/env_dataset_ql_site.toml`，不并入正式配置 | 用户要求引用它作融合场景。它没有 `[thermal]`（authored 温度）、采样也不同（俯仰 45°、半径 300 m），并入会改变正式配方；大气从源配置的 disabled 覆盖为 NN `clear` 预设（300 m 斜距下 IR 路径项不可忽略） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险
 
 待决：
 
-- 子集跑完后：何时启动全量采集（约 264 GPU 小时）。
+- 何时启动全量采集（0.8.3 下外推约 31 GPU 小时，0.7.4 时约 264 小时）。
+- 是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并重跑实验：`configs/experiments/*.toml` 仍指向 0.7.4 数据集，它们的 seaside 海面、近场大气与 LWIR 噪声与 0.8.3 不同（见迁移对照）。
+- ql_site 是否扩大采样（更多俯仰/距离）、是否给它配专门的 VIS 曝光（沿用正式配置 5e-5 s 时 rawdn 中位只有 61/4095）。
 - 工况标签是否在配置/样本清单中显式化（目前只能从 `scene_id` 后缀推导）。
 - `sample.json` 是否升 v2（真值按产品名索引）。
 
@@ -464,8 +474,10 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在：T4.5 完成。pilot 实验结果在 `build/experiments/pilot-baselines/`（`results.jsonl`、`summary.csv`、`variants.json`、`errors.jsonl`）。子集实验已在 Windows 上脱离启动（`configs/experiments/subset_baselines.toml`，约 96 × 60 s ≈ 1.6 小时），输出 `build/experiments/subset-baselines/`，终端日志 `build/_exp/subset-run.log`（输出有缓冲，进度看 `wc -l` 该目录的 `results.jsonl`）。中断了就用同一命令续跑：`cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run python -m quantiloom_fusion.experiments run configs/experiments/subset_baselines.toml"`（cwd 在仓库根）。子集采集已完成，datagen 冻结仍然有效（为正式采集保留）。
+- 当前停在：Quantiloom 0.8.3 迁移完成（2026-10-26，`f2b5a22`…`10b0e68`），ql_site 实测扫描场景配置入库并已渲染（`build/env-qlsite-0.8.3-r2`）。T4.5 及以前的实验结果都基于 0.7.4 数据集。迁移中 datagen 改了两处（湿度键、`look_at`）；正式采集尚未开始，冻结从它启动时的 HEAD 起算，0.7.4 的 pilot/子集目录只能 `verify`。
+- 此前状态（2026-10-13）：T4.5 完成。pilot 实验结果在 `build/experiments/pilot-baselines/`（`results.jsonl`、`summary.csv`、`variants.json`、`errors.jsonl`）。子集实验已在 Windows 上脱离启动（`configs/experiments/subset_baselines.toml`，约 96 × 60 s ≈ 1.6 小时），输出 `build/experiments/subset-baselines/`，终端日志 `build/_exp/subset-run.log`（输出有缓冲，进度看 `wc -l` 该目录的 `results.jsonl`）。中断了就用同一命令续跑：`cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run python -m quantiloom_fusion.experiments run configs/experiments/subset_baselines.toml"`（cwd 在仓库根）。子集采集已完成（0.7.4，生成器 `bbbf3e3`）。
 - 下一步（按依赖顺序）：
+  0. 决定是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并据此重跑实验（见「待决」）；正式采集用 `build/env-three-band-0.8.3`，外推约 31 GPU 小时。
   1. 修正配准对比的评价区域（见「待决问题与风险」第一条），升相关 `Metric` 的区域取法并换新的实验名重跑 pilot。
   2. 子集 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。
   3. T4.6 互补信息量化（VIS→`truth_surface_temperature` 回归残差、条件互信息 I(Y; LWIR | VIS)），T4.7 任务驱动评价（实例/材质 ID 分割）。

@@ -68,14 +68,24 @@ config = "env_seaside.toml"
 # humidity taken from the forcing row at 23:00, not kept at day values).
 # atmosphere_temperature_k follows the forcing sky_temperature_k; the sun
 # direction is the real below-horizon solar position at 23:00.
+# The night arm keeps the scene's solar table, scaled to 1e-12, only so the
+# renderer can derive the short-wave absorptivity its day-long thermal solve
+# needs (Quantiloom derives it from lighting.solar_lut and otherwise assumes
+# 0.7): the 23:00 temperatures then come from the same day as the low-light
+# arm's. With the sun below the horizon an unscaled table still lights the
+# sky (VIS rawdn median 23 DN instead of 0); 1e-12 leaves no visible light.
 [[scenes]]
 id = "concrete_night"
 config = "env_concrete.toml"
+solar_scale = 1e-12
 [scenes.overrides]
 [scenes.overrides.lighting]
 sun_direction = [-0.307151, -0.928486, 0.208740]
 sun_radiance = [0.0, 0.0, 0.0]
 sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
 atmosphere_temperature_k = 284.68
 [scenes.overrides.thermal]
 enabled = true
@@ -110,11 +120,15 @@ sky_model = "isotropic"
 [[scenes]]
 id = "desert_night"
 config = "env_desert.toml"
+solar_scale = 1e-12
 [scenes.overrides]
 [scenes.overrides.lighting]
 sun_direction = [0.414719, -0.866897, -0.276583]
 sun_radiance = [0.0, 0.0, 0.0]
 sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
 atmosphere_temperature_k = 271.76
 [scenes.overrides.thermal]
 enabled = true
@@ -149,11 +163,15 @@ sky_model = "isotropic"
 [[scenes]]
 id = "grassland_night"
 config = "env_grassland.toml"
+solar_scale = 1e-12
 [scenes.overrides]
 [scenes.overrides.lighting]
 sun_direction = [-0.195863, -0.958820, -0.205676]
 sun_radiance = [0.0, 0.0, 0.0]
 sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
 atmosphere_temperature_k = 269.59
 [scenes.overrides.thermal]
 enabled = true
@@ -179,11 +197,15 @@ rh = 0.655
 [[scenes]]
 id = "seaside_night"
 config = "env_seaside.toml"
+solar_scale = 1e-12
 [scenes.overrides]
 [scenes.overrides.lighting]
 sun_direction = [-0.159778, -0.959805, -0.230748]
 sun_radiance = [0.0, 0.0, 0.0]
 sky_radiance = [0.0, 0.0, 0.0]
+solar_lut = "assets/luts/astmg173.csv"
+solar_lut_columns = [4, 3]
+solar_lut_diffuse_is_global = true
 atmosphere_temperature_k = 280.58
 [scenes.overrides.thermal]
 enabled = true

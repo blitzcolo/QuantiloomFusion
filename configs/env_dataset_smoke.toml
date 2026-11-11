@@ -47,11 +47,15 @@
 [["scenes"]]
 "id" = "concrete_night"
 "config" = "env_concrete.toml"
+"solar_scale" = 1e-12
 ["scenes"."overrides"]
 ["scenes"."overrides"."lighting"]
 "sun_direction" = [-0.307151, -0.928486, 0.208740]
 "sun_radiance" = [0.0, 0.0, 0.0]
 "sky_radiance" = [0.0, 0.0, 0.0]
+"solar_lut" = "assets/luts/astmg173.csv"
+"solar_lut_columns" = [4, 3]
+"solar_lut_diffuse_is_global" = true
 "atmosphere_temperature_k" = 284.68
 ["scenes"."overrides"."atmosphere"]
 "preset" = "clear"

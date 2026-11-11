@@ -96,6 +96,7 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 9. ~~物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。~~ 已关闭（2026-11-11）：Quantiloom-Qt 当前的 `env_*.toml` 里车身绑定的是白色涂层实测谱（`White rubberized coating (0795UUURBR)`，LWIR ε≈0.92，热求解 `ir_emissivity = 0.92`），根本不是 Al 的 n,k；文档按 Qt 配置改正，Al n,k 只在裸铝部件 `Car_M_IRON.004` 上。
 10. 场景待核实：Qt 白天场景的 NN 湿度与其 forcing 不一致——concrete 不写 `rh`（`clear` 预设值 0.50）而 `concrete_day.csv` 14 时湿度 30.4 %；desert 0.15 对 11 时 11.0 %、grassland 0.50（预设）对 10 时 54.1 %、seaside 0.70 对 16 时 68.3 %（2026-11-11 按 Qt `406deb8` 之后的文件重读）。热求解读 forcing 的湿度列，只有 NN 大气用 `rh`，所以大气与热平衡描述的不是同一团空气。场景文件属 Quantiloom-Qt，本仓库不改；要统一，可在配置的 `overrides.atmosphere` 里写全白天大气段（改配方，需用户决定）。
 11. `tests/test_dataset_splits.py::test_real_dataset_single_shared_group` 假设 `QUANTILOOM_TEST_DATASET` 只有一个 `split_group`（pilot），而文档与 skill 指定的测试数据集是 smoke（4 组）：用 `build/env-smoke-0.8.3` 与 `build/env-smoke-0.7.4` 都失败（`assert 4 == 1`）。是测试的既有假设问题，与 0.8.3 无关，待修。
+12. 渲染器待核实（属 Quantiloom-dev）：太阳在地平线下（`sun_direction` 的 y < 0）时，带 `solar_lut` 的光谱模式仍按太阳表的天空项照明——不缩放的 G-173 让 23 时的 concrete VIS rawdn 中位从 0 变成 23 DN（`build/_qa/night-lut-0.10.0`）。本数据集用 1e-12 缩放绕开（见决策记录），未在渲染器里改。
 
 ---
 
@@ -456,6 +457,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-11-11 | 同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的气温、湿度、天空温度随时刻不同；四个场景之间不要求相同 | 用户决定。三种工况的比较才是照度的单变量对照；夜间地表温度来自晴空直射的白天热历史，成像大气要与之自洽。渲染器 0.10.0 对"地面参考太阳谱 + 非晴空"直接报错（低照度臂太阳在地平线上 5°，派生 CSV 保留 ETR 列名，同样受约束）：concrete 夜间/低照度由 urban_haze（8 km、ihaze 5）改为 clear，desert 由 18 km 改为与白天相同的 20 km，grassland 补上 23:00 的 rh 0.655 与气温 288.25 K |
 | 2026-11-11 | 白天太阳谱按 forcing 直射缩放（scale = forcing 采集时刻直射 ÷ 参考谱直射列积分，由生成器计算）；不把海边采集时刻挪到太阳更高时 | 用户决定（挪时刻是备选）。只对齐幅度、不改谱形；NN 太阳散射缩放只跟随低照度 2e-6——幅度对齐不是照度工况的改变 |
 | 2026-11-11 | MWIR 与 LWIR 统一为两点 NUC 残余 3 %，VIS 不校正；两类探测器启用行列条纹，总量不变、按列为主分配（LWIR 增益 0.016/0.023/0.010、偏置 1.10/1.55/0.65 K；MWIR 增益 0.0074/0.006/0.003、暗信号 5.9/4.8/2.4 e⁻） | 用户决定（取值为假设值）。三台相机校正口径不一致会污染融合比较；逐像素独立的图样在单帧上与时域噪声无异，条纹才是非制冷长波的特征 |
+| 2026-11-11 | 夜间条目保留太阳表并按 `solar_scale = 1e-12` 缩放 | 渲染器只从 `lighting.solar_lut` 推导短波吸收率、否则取 0.7；夜间热求解（0→23 时）必须与白天、低照度用同一吸收率，而不缩放的太阳表在地平线下仍照亮天空。是对渲染器行为的绕行，更干净的做法是渲染器提供只用于推导吸收率的光谱入口（属 Quantiloom-dev） |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险

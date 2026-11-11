@@ -20,7 +20,7 @@
 
 | 编号 | 目标 | 交付物 |
 | --- | --- | --- |
-| G1 | 受控基准数据集：正式配置 2592 个三波段样本 / 7776 次采集，可断点续跑、可在 Windows 与 WSL 间交替执行、可独立校验 | `build/env-three-band-0.8.3/`（不入库）+ 发布清单 |
+| G1 | 受控基准数据集：正式配置 576 个三波段样本 / 1728 次采集（2026-11-11 前为 2592 / 7776），可断点续跑、可在 Windows 与 WSL 间交替执行、可独立校验 | `build/env-three-band-0.8.3/`（不入库）+ 发布清单 |
 | G2 | 消费端数据读取：不依赖 Quantiloom 即可类型化地读取产品、信号语义、相机几何、真值 | `quantiloom_fusion.dataset` |
 | G3 | 几何与配准：用真值深度 + 位姿 + 内参 + 畸变做 oracle 重投影与双向遮挡；配准方法接口与误差度量 | `geometry`、`registration` |
 | G4 | 融合：N 波段融合方法接口、注册表、经典基线、未配准深度基线适配 | `fusion` |
@@ -54,7 +54,7 @@
 
 ### 2.2 实测吞吐（决定正式采集的排期）
 
-pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**——这是 0.7.4 的数。**0.8.3**（2026-10-26，同一批任务 TOML 的前 3 个三元组，`build/env-pilot-0.8.3-asis`）：VIS 25 s、MWIR 9.8 s、LWIR 8.8 s，三元组约 43 s，外推正式配置约 **31 GPU 小时**（待核实：同样假设各场景耗时与 concrete 相近）；样本约 33 GB，attempts 约 67 GB（`build/` 在 H 盘，剩余约 1.1 TB，见 §2.4）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。
+pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_samples=12`）单次采集中位耗时：VIS 24 s、MWIR 152 s、LWIR 191 s，三元组约 6.1 分钟（24 个三元组共 2.35 小时，与之吻合）。按此外推，正式配置 2592 个三元组约 **264 GPU 小时（约 11 天连续运行）**——这是 0.7.4 的数。**0.8.3**（2026-10-26，同一批任务 TOML 的前 3 个三元组，`build/env-pilot-0.8.3-asis`）：VIS 25 s、MWIR 9.8 s、LWIR 8.8 s，三元组约 43 s，外推正式配置约 **31 GPU 小时**（待核实：同样假设各场景耗时与 concrete 相近）；样本约 33 GB，attempts 约 67 GB（`build/` 在 H 盘，剩余约 1.1 TB，见 §2.4）。外推假设各场景耗时与 concrete 相近，待正式运行头几十个样本校正。**2026-11-11 正式配置缩为 576 个三元组**（8 方位 × 俯仰 12°/25° × 3 距离 × 12 条目）：按 0.8.3 的三元组 43 s 外推约 **6.9 GPU 小时**（576 × 43 s；按 0.7.4 的 6.1 分钟则约 59 小时），样本约 7.3 GB、attempts 约 15 GB（按上面 2592 规模的体量等比折算）；0.10.0 的吞吐待新 pilot 实测后替换此数。
 
 ### 2.3 环境
 
@@ -418,7 +418,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 | 迁移到 Quantiloom 0.8.3 | 完成 | 同一批任务 TOML 与种子分别用 0.7.4、0.8.3 渲染对照（smoke 6 个三元组、pilot 前 3 个），结果见数据集文档"0.7.4 → 0.8.3 迁移对照"。生成器两处修复：只写一个湿度键（`f2b5a22`，0.8.3 smoke 84 个产品与修复前逐像素一致，告警 9 → 0）；`look_at` 放在相机组到目标的距离上（`fa0ea21`，ql_site 首次渲染因 float32 位姿精度被校验拒绝后发现）。文档与 skill 的版本、目录与基线数 `f0a79a9`。`build/env-smoke-0.8.3` 两侧 `verify --inspect-exr` complete=6/6；两侧 `215 passed, 11 skipped`，带真实数据集 `225 passed, 1 failed`（既有问题，见 §2.5 第 11 条） |
 | ql_site 实测扫描场景 | 完成 | `10b0e68` `configs/env_dataset_ql_site.toml`：引用 `H:/LidarPointCloud/out/ql_site/site.mwir.toml`，authored 温度、NN `clear` 大气、8 方位 × 45° × 300 m。`build/env-qlsite-0.8.3-r2` 一次跑完 8/8（7 分 50 秒），`verify --inspect-exr` complete=8/8；闭合审计 rms 2.0/1.8 K。红外是模拟的（只有网格与照片纹理实测），见数据集文档对应小节 |
-| 同步 Quantiloom 0.10.0 与 Qt 场景（2026-11-11） | 进行中 | 夜间/低照度臂大气与白天同预设（concrete clear、desert 20 km、grassland 补 23:00 湿度与气温），四份配置同步；正式配置 `plan` 12 个条目全部通过（`build/_parity/20261111-c1-formal`，2592 三元组，尚未改采样）。23:00 行重新核对：四个场景的 `t_ground_K`/`air_temperature_k`/`rh`/`atmosphere_temperature_k`/`initial_temperature_k` 与重新生成后的 forcing 一致（grassland 原缺 rh 与气温，已补） |
+| 同步 Quantiloom 0.10.0 与 Qt 场景（2026-11-11） | 进行中 | 夜间/低照度臂大气与白天同预设（concrete clear、desert 20 km、grassland 补 23:00 湿度与气温），四份配置同步；正式配置 `plan` 12 个条目全部通过（`build/_parity/20261111-c1-formal`，2592 三元组）。采样改为 8 方位 × 俯仰 12°/25° × 3 距离：`plan` 报 576 三元组 / 1728 次采集，每条目 48 个（`build/_parity/20261111-c2-formal`），按 0.8.3 吞吐外推约 6.9 GPU 小时（见 §2.2）。23:00 行重新核对：四个场景的 `t_ground_K`/`air_temperature_k`/`rh`/`atmosphere_temperature_k`/`initial_temperature_k` 与重新生成后的 forcing 一致（grassland 原缺 rh 与气温，已补） |
 
 ## 7. 决策记录
 
@@ -458,7 +458,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 待决：
 
-- 何时启动全量采集（0.8.3 下外推约 31 GPU 小时，0.7.4 时约 264 小时）。
+- 何时启动全量采集（576 个三元组，按 0.8.3 吞吐外推约 6.9 GPU 小时）。
 - 是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并重跑实验：`configs/experiments/*.toml` 仍指向 0.7.4 数据集，它们的 seaside 海面、近场大气与 LWIR 噪声与 0.8.3 不同（见迁移对照）。
 - ql_site 是否扩大采样（更多俯仰/距离）、是否给它配专门的 VIS 曝光（沿用正式配置 5e-5 s 时 rawdn 中位只有 61/4095）。
 - 工况标签是否在配置/样本清单中显式化（目前只能从 `scene_id` 后缀推导）。
@@ -479,7 +479,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 - 当前停在：Quantiloom 0.8.3 迁移完成（2026-10-26，`f2b5a22`…`10b0e68`），ql_site 实测扫描场景配置入库并已渲染（`build/env-qlsite-0.8.3-r2`）。T4.5 及以前的实验结果都基于 0.7.4 数据集。迁移中 datagen 改了两处（湿度键、`look_at`）；正式采集尚未开始，冻结从它启动时的 HEAD 起算，0.7.4 的 pilot/子集目录只能 `verify`。
 - 此前状态（2026-10-13）：T4.5 完成。pilot 实验结果在 `build/experiments/pilot-baselines/`（`results.jsonl`、`summary.csv`、`variants.json`、`errors.jsonl`）。子集实验已在 Windows 上脱离启动（`configs/experiments/subset_baselines.toml`，约 96 × 60 s ≈ 1.6 小时），输出 `build/experiments/subset-baselines/`，终端日志 `build/_exp/subset-run.log`（输出有缓冲，进度看 `wc -l` 该目录的 `results.jsonl`）。中断了就用同一命令续跑：`cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run python -m quantiloom_fusion.experiments run configs/experiments/subset_baselines.toml"`（cwd 在仓库根）。子集采集已完成（0.7.4，生成器 `bbbf3e3`）。
 - 下一步（按依赖顺序）：
-  0. 决定是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并据此重跑实验（见「待决」）；正式采集用 `build/env-three-band-0.8.3`，外推约 31 GPU 小时。
+  0. 决定是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并据此重跑实验（见「待决」）；正式采集用新目录（如 `build/env-three-band-0.10.0`），576 个三元组外推约 6.9 GPU 小时。
   1. 修正配准对比的评价区域（见「待决问题与风险」第一条），升相关 `Metric` 的区域取法并换新的实验名重跑 pilot。
   2. 子集 `verify --inspect-exr`、汇总 CLOSURE 行与吞吐。
   3. T4.6 互补信息量化（VIS→`truth_surface_temperature` 回归残差、条件互信息 I(Y; LWIR | VIS)），T4.7 任务驱动评价（实例/材质 ID 分割）。

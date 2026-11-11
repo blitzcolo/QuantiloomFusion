@@ -31,8 +31,11 @@ closure_audit_every = 50
 
 # Full Cartesian product; every tuple always produces all three bands.
 [sampling]
-azimuths_deg = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345]
-elevations_deg = [5, 12, 25]
+# 8 x 2 x 3 per scene entry: neighbouring 15 deg azimuths were near-duplicate
+# views for evaluation, and 5 deg elevation (85 deg view zenith on the ground)
+# is where the isotropic emissivity of diffuse materials is least reliable.
+azimuths_deg = [0, 45, 90, 135, 180, 225, 270, 315]
+elevations_deg = [12, 25]
 radius_scales = [0.8, 1.0, 1.25]
 repeats = 1
 

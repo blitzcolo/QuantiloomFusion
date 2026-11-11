@@ -240,6 +240,36 @@ class PlanningContracts(unittest.TestCase):
         self.out=self.root/'dataset2'
         with self.assertRaisesRegex(ValueError,'forcing_file and time_h'):self.plan()
 
+    def test_fixed_pattern_and_nuc_reach_the_job_and_are_validated(self):
+        p=self.plan();cams=p['samples'][0]['cameras']
+        job={b:tomllib.loads((self.out/cams[b]['job']).read_text())['sensor'] for b in constants.BANDS}
+        mw=job['mwir']['photon']
+        self.assertEqual({k:mw[k] for k in ('prnu_sigma','dsnu_e_rms','column_gain_sigma','column_offset_e_rms','row_gain_sigma','row_offset_e_rms','apply_nuc','nuc_residual_fraction')},
+                         {'prnu_sigma':0.0074,'dsnu_e_rms':5.9,'column_gain_sigma':0.006,'column_offset_e_rms':4.8,'row_gain_sigma':0.003,'row_offset_e_rms':2.4,'apply_nuc':True,'nuc_residual_fraction':0.03})
+        self.assertEqual((job['vis']['photon']['apply_nuc'],job['vis']['photon']['column_gain_sigma']),(False,0.0))
+        lw=job['lwir']['thermal']
+        self.assertEqual({k:lw[k] for k in ('enable_fpn','fpn_gain_sigma','fpn_offset_k','fpn_column_gain_sigma','fpn_column_offset_k','fpn_row_gain_sigma','fpn_row_offset_k','apply_nuc','nuc_residual_fraction')},
+                         {'enable_fpn':True,'fpn_gain_sigma':0.016,'fpn_offset_k':1.1,'fpn_column_gain_sigma':0.023,'fpn_column_offset_k':1.55,'fpn_row_gain_sigma':0.01,'fpn_row_offset_k':0.65,'apply_nuc':True,'nuc_residual_fraction':0.03})
+        # Each component's variance adds; the totals stay at 1 %/8 e- and 3 %/2 K.
+        self.assertAlmostEqual(math.hypot(mw['prnu_sigma'],mw['column_gain_sigma'],mw['row_gain_sigma']),0.01,places=4)
+        self.assertAlmostEqual(math.hypot(mw['dsnu_e_rms'],mw['column_offset_e_rms'],mw['row_offset_e_rms']),8.0,places=1)
+        self.assertAlmostEqual(math.hypot(lw['fpn_gain_sigma'],lw['fpn_column_gain_sigma'],lw['fpn_row_gain_sigma']),0.03,places=3)
+        self.assertAlmostEqual(math.hypot(lw['fpn_offset_k'],lw['fpn_column_offset_k'],lw['fpn_row_offset_k']),2.0,delta=0.01)
+        cases=[('mwir','nuc_residual_fraction',1.5,r'cameras\.mwir\.nuc_residual_fraction must be a number in \[0, 1\]'),
+               ('mwir','apply_nuc',1,r'cameras\.mwir\.apply_nuc must be true or false'),
+               ('lwir','fpn_offset_k',-1.0,r'cameras\.lwir\.fpn_offset_k must be a finite number >= 0'),
+               ('vis','row_offset_e_rms','x',r'cameras\.vis\.row_offset_e_rms must be a finite number >= 0'),
+               ('lwir','fpn_column_gain_sigma',1.2,r'cameras\.lwir\.fpn_column_gain_sigma is a relative gain deviation'),
+               ('lwir','column_gain_sigma',0.01,r'cameras\.lwir\.column_gain_sigma belongs to the other detector kind'),
+               ('mwir','column_offset_e_rms',None,r'cameras\.mwir\.column_offset_e_rms is required')]
+        for band,key,value,message in cases:
+            with self.subTest(band=band,key=key):
+                broken=copy.deepcopy(self.settings)
+                if value is None:del broken['cameras'][band][key]
+                else:broken['cameras'][band][key]=value
+                self.config.write_text(tomlio.toml_text(broken))
+                with self.assertRaisesRegex(ValueError,message):settings.read_settings(self.config)
+
     def test_pose_survives_float32_far_from_origin(self):
         # The renderer rebuilds the view basis in float32 from look_at - position.
         self.settings['scenes'][0].update(target=[-508.6,-117.6,-406.4],radius_m=600.0);self.save()

@@ -28,9 +28,15 @@ def sensor_config(band,c,d,identity):
     if band=="lwir":
         sensor.update(effective_min_nm=8000.0,effective_max_nm=12000.0)
         sensor["channels"]=[{"name":"Mono","absorptance":{"kind":"thermal_absorptance","wavelength_nm":[8000.0,12000.0],"value":[.8,.8]}}]
-        sensor["thermal"]={"netd_k":c["netd_k"],"responsivity_dn_w":c["responsivity_dn_w"],"time_constant_s":c["time_constant_s"]}
+        # The whole fixed pattern is stated here rather than inherited from the
+        # preset, so the dataset does not move when the preset's defaults do.
+        sensor["thermal"]={"netd_k":c["netd_k"],"responsivity_dn_w":c["responsivity_dn_w"],"time_constant_s":c["time_constant_s"],
+            "enable_fpn":True,**{k:c[k] for k in ("fpn_gain_sigma","fpn_offset_k","fpn_column_gain_sigma","fpn_column_offset_k","fpn_row_gain_sigma","fpn_row_offset_k")},
+            "apply_nuc":c["apply_nuc"],"nuc_residual_fraction":c["nuc_residual_fraction"]}
     else:
-        sensor["photon"]={"full_well_e":c["full_well_e"],"electrons_per_dn":c["electrons_per_dn"],"read_noise_e_rms":c["read_noise_e_rms"],"prnu_sigma":c["prnu_sigma"],"dsnu_e_rms":c["dsnu_e_rms"],"enable_fpn":True}
+        sensor["photon"]={"full_well_e":c["full_well_e"],"electrons_per_dn":c["electrons_per_dn"],"read_noise_e_rms":c["read_noise_e_rms"],"prnu_sigma":c["prnu_sigma"],"dsnu_e_rms":c["dsnu_e_rms"],"enable_fpn":True,
+            **{k:c[k] for k in ("column_gain_sigma","column_offset_e_rms","row_gain_sigma","row_offset_e_rms")},
+            "apply_nuc":c["apply_nuc"],"nuc_residual_fraction":c["nuc_residual_fraction"]}
         # electrons_per_dn is a readout field, never a photon parameter.
         sensor["readout"]["electrons_per_dn"]=sensor["photon"].pop("electrons_per_dn")
         if band=="vis":

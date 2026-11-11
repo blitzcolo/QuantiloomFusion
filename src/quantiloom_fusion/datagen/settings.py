@@ -28,6 +28,31 @@ def vector(v, name):
     return [float(x) for x in v]
 
 
+# Fixed pattern and two-point NUC, stated per camera rather than inherited
+# from a renderer preset. Photon detectors keep PRNU/DSNU (prnu_sigma,
+# dsnu_e_rms) as the per-pixel part and add column/row parts; the thermal
+# detector states all six. The three parts' variances add.
+PHOTON_LINE_KEYS=("column_gain_sigma","column_offset_e_rms","row_gain_sigma","row_offset_e_rms")
+THERMAL_FPN_KEYS=("fpn_gain_sigma","fpn_offset_k","fpn_column_gain_sigma","fpn_column_offset_k","fpn_row_gain_sigma","fpn_row_offset_k")
+
+
+def fixed_pattern(band,c):
+    own,other=(THERMAL_FPN_KEYS,PHOTON_LINE_KEYS) if band=="lwir" else (PHOTON_LINE_KEYS,THERMAL_FPN_KEYS)
+    for k in other:
+        if k in c:raise ValueError(f"cameras.{band}.{k} belongs to the other detector kind; {band} takes {', '.join(own)}")
+    for k in ("apply_nuc","nuc_residual_fraction",*own):
+        if k not in c:raise ValueError(f"cameras.{band}.{k} is required")
+    if type(c["apply_nuc"]) is not bool:raise ValueError(f"cameras.{band}.apply_nuc must be true or false")
+    r=c["nuc_residual_fraction"]
+    if isinstance(r,bool) or not isinstance(r,(int,float)) or not math.isfinite(r) or not 0<=r<=1:
+        raise ValueError(f"cameras.{band}.nuc_residual_fraction must be a number in [0, 1], got {r!r}")
+    for k in own:
+        v=c[k]
+        if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0:
+            raise ValueError(f"cameras.{band}.{k} must be a finite number >= 0, got {v!r}")
+        if k.endswith("gain_sigma") and v>=1:raise ValueError(f"cameras.{band}.{k} is a relative gain deviation and must be below 1, got {v!r}")
+
+
 def read_settings(path):
     doc=tomllib.loads(path.read_text(encoding="utf-8-sig"))
     check_keys(doc,{"dataset","sampling","scenes","cameras"},"root")
@@ -52,7 +77,8 @@ def read_settings(path):
     if d["verification"] not in ("hashes","pixels"):raise ValueError("verification must be hashes or pixels")
     if set(doc["cameras"])!=set(BANDS):raise ValueError("exactly vis, mwir, lwir profiles are required")
     for band,c in doc["cameras"].items():
-        check_keys(c,{"resolution","fov_y_deg","pixel_pitch_um","f_number","exposure_s","offset_rdf_m","rotation_ypr_deg","psf_sigma_px","read_noise_e_rms","prnu_sigma","dsnu_e_rms","full_well_e","electrons_per_dn","adc_bits","netd_k","responsivity_dn_w","time_constant_s","warmup_s","distortion","noise_free"},f"cameras.{band}")
+        check_keys(c,{"resolution","fov_y_deg","pixel_pitch_um","f_number","exposure_s","offset_rdf_m","rotation_ypr_deg","psf_sigma_px","read_noise_e_rms","prnu_sigma","dsnu_e_rms","full_well_e","electrons_per_dn","adc_bits","netd_k","responsivity_dn_w","time_constant_s","warmup_s","distortion","noise_free","apply_nuc","nuc_residual_fraction",*PHOTON_LINE_KEYS,*THERMAL_FPN_KEYS},f"cameras.{band}")
+        fixed_pattern(band,c)
         if len(c["resolution"])!=2:raise ValueError("resolution requires width,height")
         for x in c["resolution"]:positive(x,"resolution",True)
         for k in ("fov_y_deg","pixel_pitch_um","f_number","exposure_s"):positive(c[k],k)

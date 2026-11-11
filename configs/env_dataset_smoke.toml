@@ -142,6 +142,12 @@
 "warmup_s" = 0.0
 "distortion" = [-0.01, 0.001, 0.0002, -0.0001, 0.0]
 "noise_free" = false
+"apply_nuc" = false
+"nuc_residual_fraction" = 1.0
+"column_gain_sigma" = 0.0
+"column_offset_e_rms" = 0.0
+"row_gain_sigma" = 0.0
+"row_offset_e_rms" = 0.0
 
 ["cameras"."mwir"]
 "resolution" = [40, 32]
@@ -153,14 +159,20 @@
 "rotation_ypr_deg" = [0.12, -0.08, 0.03]
 "psf_sigma_px" = 0.8
 "read_noise_e_rms" = 250.0
-"prnu_sigma" = 0.01
-"dsnu_e_rms" = 8.0
+"prnu_sigma" = 0.0074
+"dsnu_e_rms" = 5.9
 "full_well_e" = 1000000.0
 "electrons_per_dn" = 122.0
 "adc_bits" = 14
 "warmup_s" = 0.0
 "distortion" = [-0.035, 0.003, -0.0003, 0.0005, 0.0]
 "noise_free" = false
+"apply_nuc" = true
+"nuc_residual_fraction" = 0.03
+"column_gain_sigma" = 0.006
+"column_offset_e_rms" = 4.8
+"row_gain_sigma" = 0.003
+"row_offset_e_rms" = 2.4
 
 ["cameras"."lwir"]
 "resolution" = [32, 24]
@@ -178,3 +190,11 @@
 "warmup_s" = 0.06
 "distortion" = [-0.055, 0.005, 0.0008, -0.0006, 0.0]
 "noise_free" = false
+"apply_nuc" = true
+"nuc_residual_fraction" = 0.03
+"fpn_gain_sigma" = 0.016
+"fpn_offset_k" = 1.10
+"fpn_column_gain_sigma" = 0.023
+"fpn_column_offset_k" = 1.55
+"fpn_row_gain_sigma" = 0.010
+"fpn_row_offset_k" = 0.65

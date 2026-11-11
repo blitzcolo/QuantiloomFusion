@@ -170,8 +170,8 @@ def verify_capture(record_path: Path, camera: dict, inspect_pixels: bool = False
 
 | 文件 | schema | 消费端用途 |
 | --- | --- | --- |
-| `dataset.index.json` | `quantiloomfusion.env_dataset` v1 | 完整样本列表、`split_group`、完成度 |
-| `samples/<id>/sample.json` | `quantiloomfusion.sample` v1 | 每波段 `observations`：产品路径、`signal`（kind/unit/transfer/cfa）、`provenance.geometry`（内参、畸变 `k1_k2_p1_p2_k3`、`camera_to_world`、`right_down_forward`、像素中心偏移 0.5、左上原点）、`extra_products`（真值） |
+| `dataset.index.json` | `quantiloomfusion.env_dataset` v1 | 完整样本列表、`split_group`、完成度；每条另有布尔 `references`（共视点参考三幅都已发布；缺省读作 false，故未升版本） |
+| `samples/<id>/sample.json` | `quantiloomfusion.sample` v2（v1 仍可读，视为无参考） | 每波段 `observations`：产品路径、`signal`（kind/unit/transfer/cfa）、`provenance.geometry`（内参、畸变 `k1_k2_p1_p2_k3`、`camera_to_world`、`right_down_forward`、像素中心偏移 0.5、左上原点）、`extra_products`（真值）；v2 另有 `references`：`{}`，或三幅都发布后 `{vis, mwir, lwir}`，结构与 `observations` 相同，外加 `geometry_from = "vis"`、`psf_sigma_px`（共视点无噪声参考，见数据集文档） |
 | `dataset.plan.json` | `quantiloomfusion.env_dataset` v1 | 配方、场景假设、相机固定配置（只读，用于溯源与消融配对） |
 
 `dataset_id` 标识配方；消融臂之间按 `sample_id` 配对（同场景/方位/俯仰/距离的 `sample_id` 在不同配方中相同）。schema 版本变化必须同时改生产端、消费端解析器与本表。

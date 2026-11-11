@@ -13,7 +13,7 @@ import pytest
 from quantiloom_fusion.core import jsonio, locking, tomlio
 from quantiloom_fusion.core.bands import BANDS, Band
 from quantiloom_fusion.datagen import planner, runner, settings
-from quantiloom_fusion.dataset import schema
+from quantiloom_fusion.dataset import ThreeBandDataset, schema
 
 from fake_renderer import FakeRenderer
 
@@ -44,7 +44,7 @@ def test_real_dataset_parses():
                 assert "truth_material_id" in obs.products
 
 
-def _fake_dataset(root: Path) -> Path:
+def _fake_dataset(root: Path, references: bool = False) -> Path:
     """Plan + run a minimal dataset through FakeRenderer (same fixture as test_datagen_run)."""
     cli = root / "Quantiloom.exe"
     cli.write_bytes(b"fixture cli")
@@ -64,6 +64,9 @@ def _fake_dataset(root: Path) -> Path:
         thermal_mode="authored", ir_materials="constant", geometry_truth=False,
         daylight_solar_scale="none")
     s["sampling"].update(azimuths_deg=[0], elevations_deg=[5], radius_scales=[1.0], repeats=1)
+    s.pop("reference_subset")
+    if references:
+        s["reference_subset"] = {"azimuths_deg": [0], "elevations_deg": [5], "radius_scales": [1.0]}
     s["scenes"] = [{"id": "test", "config": scene_toml.as_posix()}]
     config = root / "experiment.toml"
     config.write_text(tomlio.toml_text(s))
@@ -90,6 +93,23 @@ def test_producer_output_parses(tmp_path):
         assert name in lwir.products
     assert len(lwir.geometry.intrinsics) == 9
     assert lwir.products["rawdn"].signal.channels == ("Y",)
+
+
+def test_producer_references_share_the_vis_geometry(tmp_path):
+    out = _fake_dataset(tmp_path, references=True)
+    index = schema.parse_index(jsonio.load_json(out / "dataset.index.json"))
+    assert [e.references for e in index.entries] == [True]
+    s = schema.parse_sample(jsonio.load_json(out / index.entries[0].manifest))
+    assert set(s.references) == set(BANDS)
+    vis = s.observations[Band.VIS]
+    for band, ref in s.references.items():
+        assert ref.band == band and ref.spectral_mode == s.observations[band].spectral_mode
+        assert ref.geometry == vis.geometry
+        assert set(ref.products) == set(s.observations[band].products)
+        assert ref.record != s.observations[band].record
+    assert s.references[Band.MWIR].geometry != s.observations[Band.MWIR].geometry
+    ds = ThreeBandDataset(out)
+    assert ds.references(s.sample_id) == dict(s.references)
 
 
 def _geometry_doc(w=8, h=6):
@@ -136,6 +156,49 @@ def _minimal_sample():
             "observations": {str(b): _observation() for b in BANDS}}
 
 
+def _v2_sample(references=True):
+    doc = _minimal_sample()
+    doc["schema_version"] = 2
+    doc["references"] = ({str(b): {**_observation(), "geometry_from": "vis", "psf_sigma_px": 0.45} for b in BANDS}
+                         if references else {})
+    return doc
+
+
+def test_v1_sample_parses_without_references():
+    assert schema.parse_sample(_minimal_sample()).references == {}
+
+
+def test_v2_sample_references():
+    s = schema.parse_sample(_v2_sample())
+    assert set(s.references) == set(BANDS)
+    assert s.references[Band.LWIR].band == Band.LWIR
+    assert schema.parse_sample(_v2_sample(references=False)).references == {}
+
+
+def test_v2_reference_negative_cases():
+    doc = _v2_sample()
+    del doc["references"]
+    with pytest.raises(ValueError, match="references"):
+        schema.parse_sample(doc)
+
+    doc = _v2_sample()
+    del doc["references"]["mwir"]
+    with pytest.raises(ValueError, match="references: expected none or bands"):
+        schema.parse_sample(doc)
+
+    doc = _v2_sample()
+    doc["references"]["lwir"]["geometry_from"] = "lwir"
+    with pytest.raises(ValueError, match="geometry_from"):
+        schema.parse_sample(doc)
+
+    doc = _v2_sample()
+    for prod in doc["references"]["lwir"]["products"].values():
+        if "provenance" in prod:
+            prod["provenance"]["geometry"]["intrinsics"] = [2.0] * 9
+    with pytest.raises(ValueError, match="geometry differs from observations.vis"):
+        schema.parse_sample(doc)
+
+
 def test_product_name_mapping():
     assert schema.product_name("frame.exr") == "rendered_reference"
     assert schema.product_name("frame.png") == "preview"
@@ -148,7 +211,7 @@ def test_product_name_mapping():
 
 def test_negative_cases():
     doc = _minimal_sample()
-    doc["schema_version"] = 2
+    doc["schema_version"] = 3
     with pytest.raises(ValueError, match="schema"):
         schema.parse_sample(doc)
 

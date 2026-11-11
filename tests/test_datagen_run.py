@@ -10,18 +10,21 @@ import json
 from pathlib import Path
 import struct
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
 from quantiloom_fusion.core import jsonio, locking, tomlio
-from quantiloom_fusion.datagen import planner, publish, runner, settings, verify
+from quantiloom_fusion.datagen import constants, planner, publish, runner, settings, verify
 
 from fake_renderer import FakeRenderer
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class RunDatasetContracts(unittest.TestCase):
+class _PlannedFixture(unittest.TestCase):
+    subset = None  # [reference_subset] table, or None for no references
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -41,6 +44,8 @@ class RunDatasetContracts(unittest.TestCase):
         self.settings['dataset'].update(cli=self.cli.as_posix(),qt_root=self.root.as_posix(),verification='hashes',
             thermal_mode='authored',ir_materials='constant',geometry_truth=False,daylight_solar_scale='none')
         self.settings['sampling'].update(azimuths_deg=[0,90],elevations_deg=[5],radius_scales=[1.0],repeats=1)
+        self.settings.pop('reference_subset')
+        if self.subset:self.settings['reference_subset'] = self.subset
         self.settings['scenes'] = [{'id':'test','config':scene_toml.as_posix()}]
         self.config = self.root/'experiment.toml'
         self.config.write_text(tomlio.toml_text(self.settings))
@@ -57,6 +62,13 @@ class RunDatasetContracts(unittest.TestCase):
         with patch.object(runner,'POSIX',False),locking.runner_lock(self.out) as (lease,lock):
             return runner.run_dataset(self.out,self.plan,args,lease,lock,renderer=fake or self.fake)
 
+    def verify_output(self):
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):self.assertEqual(verify.verify_dataset(self.out),0)
+        return captured.getvalue()
+
+
+class RunDatasetContracts(_PlannedFixture):
     def test_full_run_indexes_and_verifies(self):
         self.assertEqual(self.drive(),0)
         index_json = jsonio.load_json(self.out/'dataset.index.json')
@@ -142,6 +154,77 @@ class RunDatasetContracts(unittest.TestCase):
         self.assertEqual(len(fake.calls),4)
         index_json = jsonio.load_json(self.out/'dataset.index.json')
         self.assertEqual(index_json['complete_triplets'],1)
+
+
+class ReferenceRunContracts(_PlannedFixture):
+    # Of the two rig cells (azimuth 0 and 90) only azimuth 0 gets references.
+    subset = {'azimuths_deg':[0],'elevations_deg':[5],'radius_scales':[1.0]}
+
+    def setUp(self):
+        super().setUp()
+        self.ref,self.plain = self.plan['samples']
+        self.sid = self.ref['sample_id']
+
+    def manifest(self,sample):return jsonio.load_json(self.out/'samples'/sample['sample_id']/'sample.json')
+    def index_flags(self):return [e['references'] for e in jsonio.load_json(self.out/'dataset.index.json')['samples']]
+
+    def test_references_follow_the_triplet_and_publish_in_sample_v2(self):
+        self.assertEqual(self.drive(),0)
+        self.assertEqual([k for s,k in self.fake.calls if s==self.sid],['vis','mwir','lwir','ref_vis','ref_mwir','ref_lwir'])
+        self.assertEqual([k for s,k in self.fake.calls if s==self.plain['sample_id']],['vis','mwir','lwir'])
+        m = self.manifest(self.ref)
+        self.assertEqual((m['schema_version'],set(m['references'])),(2,set(constants.BANDS)))
+        vis_geometry = m['observations']['vis']['products']['measurement']['provenance']['geometry']
+        for band,ref in m['references'].items():
+            self.assertEqual((ref['geometry_from'],ref['psf_sigma_px']),('vis',self.settings['cameras']['vis']['psf_sigma_px']))
+            self.assertEqual(set(ref['products']),set(m['observations'][band]['products']))
+            self.assertEqual(Path(ref['record']).parent.as_posix(),f'samples/{self.sid}/ref_{band}/v0001')
+            provenance = ref['products']['measurement']['provenance']
+            self.assertEqual(provenance['geometry'],vis_geometry)
+            sensor = tomllib.loads(provenance['camera_config_toml'])['sensor']
+            real = tomllib.loads(m['observations'][band]['products']['measurement']['provenance']['camera_config_toml'])['sensor']
+            self.assertEqual((sensor['quality']['noise_free'],sensor['preset']),(True,real['preset']))
+            receipt = jsonio.load_json(self.out/'state'/self.sid/f'ref_{band}.json')
+            self.assertEqual((receipt['status'],receipt['record']),('complete',ref['record']))
+        self.assertEqual(self.manifest(self.plain)['references'],{})
+        self.assertEqual(self.index_flags(),[True,False])
+        self.assertIn('references=1/1',self.verify_output())
+
+    def test_resume_is_a_noop(self):
+        self.assertEqual(self.drive(),0)
+        second = FakeRenderer()
+        self.assertEqual(self.drive(fake=second),0)
+        self.assertEqual(second.calls,[])
+        self.assertEqual(self.index_flags(),[True,False])
+
+    def test_corrupted_reference_is_detected_and_repaired(self):
+        self.assertEqual(self.drive(),0)
+        product = self.out/'samples'/self.sid/'ref_mwir'/'v0001'/'frame_rawdn.exr'
+        data = bytearray(product.read_bytes());data[0] ^= 0xFF
+        product.write_bytes(bytes(data))
+        with self.assertRaisesRegex(ValueError,'corrupt product'):verify.verify_dataset(self.out)
+        repair = FakeRenderer()
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):self.assertEqual(self.drive(fake=repair),0)
+        self.assertIn(f'REPAIR {self.sid}/ref_mwir',captured.getvalue())
+        self.assertEqual(repair.calls,[(self.sid,'ref_mwir')])
+        self.assertEqual(sorted(p.name for p in (self.out/'attempts'/self.sid/'ref_mwir').iterdir()),['attempt-0001','attempt-0002'])
+        self.assertEqual(Path(self.manifest(self.ref)['references']['mwir']['record']).parent.name,'v0002')
+        self.assertIn('references=1/1',self.verify_output())
+
+    def test_capture_budget_counts_references(self):
+        fake = FakeRenderer()
+        self.assertEqual(self.drive(fake=fake,max_captures=4),0)
+        self.assertEqual(fake.calls,[(self.sid,b) for b in ('vis','mwir','lwir','ref_vis')])
+        # The triplet is indexed as soon as it is complete; its references
+        # join the manifest only once all three are published.
+        self.assertEqual(self.index_flags(),[False])
+        self.assertEqual(self.manifest(self.ref)['references'],{})
+        self.assertIn('references=0/1',self.verify_output())
+        more = FakeRenderer()
+        self.assertEqual(self.drive(fake=more,max_captures=2),0)
+        self.assertEqual(more.calls,[(self.sid,'ref_mwir'),(self.sid,'ref_lwir')])
+        self.assertEqual(self.index_flags(),[True])
 
 
 if __name__=='__main__':unittest.main()

@@ -23,6 +23,11 @@
 "radius_scales" = [1.0]
 "repeats" = 1
 
+["reference_subset"]
+"azimuths_deg" = [0, 90, 180, 270]
+"elevations_deg" = [12]
+"radius_scales" = [1.0]
+
 [["scenes"]]
 "id" = "concrete"
 "config" = "env_concrete.toml"

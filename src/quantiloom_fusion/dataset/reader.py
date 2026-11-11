@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 
+from ..core.bands import Band
 from ..core.jsonio import load_json
 from ..core.paths import native_path
 from . import exr
@@ -48,6 +49,19 @@ class ThreeBandDataset:
         if s.split_group != entry.split_group:
             raise ValueError(f"{sample_id}: manifest split_group {s.split_group} != index {entry.split_group}")
         return s
+
+    def references(self, sample_id: str) -> dict[Band, Observation]:
+        """The co-view noise-free references of a sample, keyed by band.
+
+        Each is rendered through the VIS camera (pose, intrinsics, distortion,
+        resolution, PSF) under that band's response, pixel-aligned with the
+        VIS observation; read products with load(observation, name).
+        """
+        refs = self.sample(sample_id).references
+        if not refs:
+            raise KeyError(f"{sample_id!r} has no co-view references (sample schema v1, "
+                           "outside the dataset's reference_subset, or not yet rendered)")
+        return dict(refs)
 
     def __iter__(self) -> Iterator[Sample]:
         for entry in self.index.entries:

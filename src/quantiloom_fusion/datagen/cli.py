@@ -28,7 +28,7 @@ def main(argv=None):
         p=sub.add_parser(name);p.add_argument('--config',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
         if name=='run':
             p.add_argument('--scene',action='append',help='select a scene; repeatable')
-            p.add_argument('--max-captures',type=int,help='new camera captures this run; may stop between bands')
+            p.add_argument('--max-captures',type=int,help='new captures (camera bands and co-view references) this run; may stop between bands')
             p.add_argument('--keep-going',action='store_true')
     p=sub.add_parser('verify');p.add_argument('--out',type=Path,required=True);p.add_argument('--inspect-exr',action='store_true')
     args=parser.parse_args(argv);out=args.out.resolve()

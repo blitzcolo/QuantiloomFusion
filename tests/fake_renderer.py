@@ -99,7 +99,9 @@ class FakeRenderer:
             "distortion": {
                 "model": "brown_conrady",
                 "coefficient_order": "k1_k2_p1_p2_k3",
-                "coefficients": [0.0] * 5,
+                # The lens the job asked for, so a co-view reference carries
+                # the VIS distortion it was planned with.
+                "coefficients": list(job["sensor"]["optics"]["projection"]["coefficients"]),
                 "max_theta_radians": 1.5,
             },
             "width": w,

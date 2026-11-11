@@ -293,7 +293,14 @@ state/<sample>/<band>.json        单款相机的恢复与验证记录
 attempts/<sample>/<band>/         原始尝试、实际配置与渲染日志
 samples/<sample>/sample.json      三波段组合元数据
 samples/<sample>/<band>/vNNNN/    完整 EXR、预览和原生导出元数据
+jobs|state|attempts|samples/<sample>/ref_<band>...   共视点无噪声参考（仅参考子集里的样本）
 ```
+
+### 共视点无噪声参考子集（`[reference_subset]`）
+
+融合质量缺一个真正的参考图像；合成数据能给出实拍给不了的东西。配置里的 `[reference_subset]`（`azimuths_deg`、`elevations_deg`、`radius_scales`，取值必须出现在 `[sampling]` 里；不写这个表则计划与任务文件逐字节不变）选出一部分样本，每个追加三次渲染 `ref_vis`、`ref_mwir`、`ref_lwir`：**几何全部取可见光相机**（位姿、分辨率、名义 FOV、畸变、偏置/旋转，光学模糊统一取可见光的 `psf_sigma_px = 0.45`），探测器类型、光谱响应与光谱模式、像元尺寸、F 数、曝光与读出取各自波段的相机（毫米焦距随像元尺寸变，像素内参与可见光相同；低照度臂的 1 s VIS 曝光同样作用于 `ref_vis`），`sensor.quality.noise_free = true`。场景各段（温度场/热求解、大气、材质、太阳表）与该样本对应波段的正式任务完全相同，只有 `[camera]`、`[renderer]` 的分辨率与种子、`[sensor]` 以及 `[dataset].acquisition_index`（按 `ref_<band>` 取键）不同；同一配方、同一指纹体系。三幅参考与可见光的无噪声图像严格共视点、逐像素对齐，没有视差，也没有传感器噪声。
+
+正式配置取方位 0°/90°/180°/270°、俯仰 12°、距离系数 1.0：12 个条目 × 4 个视角 = 48 个参考样本、144 次渲染（`plan` 打印 `(+144 reference renders)`）；pilot 12 个、smoke 6 个（全部样本）。参考在该样本三个正式波段之后渲染，与相机采集一样计入 `--max-captures`、走同一套 attempt/receipt/发布/恢复（`state|attempts|samples/<id>/ref_<band>`）；样本是否完整仍只看三个正式波段，参考是独立的一组产品。发布：`sample.json` 升为 v2，`references` 在三幅都发布后才非空，结构与 `observations` 相同；`dataset.index.json` 每条带 `references` 布尔值；`verify` 打印 `references=<已发布>/<计划>`。消费端只经契约读取（`Sample.references`、`ThreeBandDataset.references(sample_id)`），不按文件名找。
 
 融合端从 `dataset.index.json` 遍历完整样本，再读取 `sample.json` 中 `observations.vis`、`observations.mwir`、`observations.lwir`。产品路径相对于数据集根目录，原生导出元数据的产品路径相对于它所在的目录。分发时保留 `dataset.plan.json`、`dataset.index.json`、`state` 和 `samples` 即可使用完整的独立验证命令；融合读取只需索引、样本清单及清单指向的产品与元数据。`jobs`、`attempts` 和原始资产用于生成端复现，不是融合端依赖。
 

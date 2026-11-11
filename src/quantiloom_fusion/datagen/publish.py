@@ -6,7 +6,14 @@ import uuid
 
 from ..core.hashing import digest
 from ..core.jsonio import atomic_json, load_json
+from .constants import REFERENCE_PREFIX
 from .export_record import safe_path, verify_capture
+
+
+def capture_record(sample,key):
+    """Plan record of a capture key: a band, or ref_<band> for a co-view reference."""
+    if key.startswith(REFERENCE_PREFIX):return sample['references'][key.removeprefix(REFERENCE_PREFIX)]
+    return sample['cameras'][key]
 
 
 def receipt_path(out,sample,band):return out/'state'/sample['sample_id']/(band+'.json')
@@ -17,7 +24,7 @@ def valid_receipt(out,sample,band,pixels):
     if not path.exists():return None
     receipt=load_json(path)
     if receipt.get('status')!='complete':return None
-    camera=sample['cameras'][band]
+    camera=capture_record(sample,band)
     if receipt['job_sha256']!=camera['job_sha256']:raise ValueError('receipt recipe mismatch')
     record=safe_path(out,receipt['record'])
     if digest(record)!=receipt['record_sha256']:raise ValueError('sidecar hash mismatch')

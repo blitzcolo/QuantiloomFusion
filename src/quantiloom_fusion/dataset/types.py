@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..core.bands import BANDS, Band
 
@@ -162,6 +162,10 @@ class Sample:
     parameters: SampleParameters
     rig_to_world: tuple[float, ...]  # 16, row-major
     observations: Mapping[Band, Observation]
+    # Co-view noise-free references (sample schema v2): every band rendered
+    # through the VIS camera's geometry, pixel-aligned with observations[VIS].
+    # Empty for schema v1 and for samples outside the reference subset.
+    references: Mapping[Band, Observation] = field(default_factory=dict)
 
     @property
     def condition(self) -> Condition:

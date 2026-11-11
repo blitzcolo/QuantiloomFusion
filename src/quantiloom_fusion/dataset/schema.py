@@ -7,6 +7,7 @@ product is added to the contract on purpose, not by accident.
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -37,9 +38,11 @@ def _req(doc: dict, key: str, where: str) -> Any:
     return doc[key]
 
 
-def _check_schema(doc: dict, name: str, where: str) -> None:
-    if _req(doc, "schema", where) != name or _req(doc, "schema_version", where) != 1:
+def _check_schema(doc: dict, name: str, where: str, versions: tuple[int, ...] = (1,)) -> int:
+    version = _req(doc, "schema_version", where)
+    if _req(doc, "schema", where) != name or version not in versions:
         raise ValueError(f"{where}: unsupported schema {doc.get('schema')!r} v{doc.get('schema_version')!r}")
+    return version
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,7 @@ class IndexEntry:
     sample_id: str
     manifest: str  # dataset-relative path of the sample.json
     split_group: str
+    references: bool = False  # its sample.json carries the three co-view references
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ def parse_index(doc: dict) -> DatasetIndex:
             _req(e, "sample_id", f"samples[{i}]"),
             _req(e, "manifest", f"samples[{i}]"),
             _req(e, "split_group", f"samples[{i}]"),
+            _flag(e.get("references", False), f"samples[{i}].references"),
         )
         for i, e in enumerate(_req(doc, "samples", "index"))
     )
@@ -88,6 +93,12 @@ def parse_index(doc: dict) -> DatasetIndex:
     return DatasetIndex(
         _req(doc, "dataset_id", "index"), complete, _req(doc, "planned_triplets", "index"), entries
     )
+
+
+def _flag(value: Any, where: str) -> bool:
+    if type(value) is not bool:
+        raise ValueError(f"{where}: expected true/false, got {value!r}")
+    return value
 
 
 def parse_plan_summary(doc: dict) -> PlanSummary:
@@ -223,15 +234,45 @@ def _observation(band: Band, doc: dict, where: str) -> Observation:
     )
 
 
+def _same_geometry(a: CameraGeometry, b: CameraGeometry) -> bool:
+    if (a.width, a.height) != (b.width, b.height):
+        return False
+    pairs = [*zip(a.intrinsics, b.intrinsics), *zip(a.distortion, b.distortion), *zip(a.camera_to_world, b.camera_to_world)]
+    return all(math.isclose(x, y, rel_tol=2e-6, abs_tol=2e-6) for x, y in pairs)
+
+
+def _references(doc: dict, vis: Observation) -> dict[Band, Observation]:
+    """Parse sample.json v2 references: {} or all three bands, each on VIS's geometry."""
+    refs = _req(doc, "references", "sample")
+    if not refs:
+        return {}
+    if set(refs) != {str(b) for b in BANDS}:
+        raise ValueError(f"references: expected none or bands {[str(b) for b in BANDS]}, got {sorted(refs)}")
+    out: dict[Band, Observation] = {}
+    for k, v in refs.items():
+        where = f"references.{k}"
+        if _req(v, "geometry_from", where) != str(Band.VIS):
+            raise ValueError(f"{where}.geometry_from: expected 'vis', got {v['geometry_from']!r}")
+        psf = _req(v, "psf_sigma_px", where)
+        if isinstance(psf, bool) or not isinstance(psf, (int, float)) or not psf >= 0:
+            raise ValueError(f"{where}.psf_sigma_px: expected a number >= 0, got {psf!r}")
+        ref = _observation(Band(k), v, where)
+        if not _same_geometry(ref.geometry, vis.geometry):
+            raise ValueError(f"{where}: geometry differs from observations.vis (co-view references share VIS's camera)")
+        out[Band(k)] = ref
+    return out
+
+
 def parse_sample(doc: dict) -> Sample:
-    """Parse one sample.json document into a typed Sample."""
-    _check_schema(doc, SCHEMA_SAMPLE, "sample")
+    """Parse one sample.json document (v1, or v2 with references) into a typed Sample."""
+    version = _check_schema(doc, SCHEMA_SAMPLE, "sample", (1, 2))
     if _req(doc, "state", "sample") != "complete":
         raise ValueError("sample.state: only 'complete' observations are published")
     obs = _req(doc, "observations", "sample")
     if set(obs) != {str(b) for b in BANDS}:
         raise ValueError(f"observations: expected bands {[str(b) for b in BANDS]}, got {sorted(obs)}")
     observations = {Band(k): _observation(Band(k), v, f"observations.{k}") for k, v in obs.items()}
+    references = _references(doc, observations[Band.VIS]) if version >= 2 else {}
     p = _req(doc, "parameters", "sample")
     return Sample(
         dataset_id=_req(doc, "dataset_id", "sample"),
@@ -246,4 +287,5 @@ def parse_sample(doc: dict) -> Sample:
         ),
         rig_to_world=tuple(_req(doc, "rig_to_world", "sample")),
         observations=observations,
+        references=references,
     )

@@ -43,6 +43,16 @@ elevations_deg = [12, 25]
 radius_scales = [0.8, 1.0, 1.25]
 repeats = 1
 
+# Co-view references: for these rig cells (every repeat; values must appear in
+# [sampling]) each band is also rendered noise-free through the VIS camera's
+# pose, resolution, FOV, distortion and PSF -- pixel-aligned with VIS, no
+# parallax, no sensor noise -- as a fusion reference. 12 scene entries x 4 =
+# 48 samples, 144 extra renders.
+[reference_subset]
+azimuths_deg = [0, 90, 180, 270]
+elevations_deg = [12]
+radius_scales = [1.0]
+
 [[scenes]]
 id = "concrete"
 config = "env_concrete.toml"

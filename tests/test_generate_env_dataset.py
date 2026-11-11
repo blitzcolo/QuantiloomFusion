@@ -51,6 +51,8 @@ class PlanningContracts(unittest.TestCase):
         self.settings['dataset'].update(cli=self.cli.as_posix(),qt_root=self.root.as_posix(),verification='hashes',
             thermal_mode='authored',ir_materials='constant',geometry_truth=False,daylight_solar_scale='none')
         self.settings['sampling'].update(azimuths_deg=[0,90,180],elevations_deg=[5,25],radius_scales=[.8,1.2],repeats=2)
+        # The formal subset names cells this sampling does not have.
+        self.settings.pop('reference_subset')
         self.settings['scenes']=[{'id':'test','config':self.scene.as_posix()}]
         self.config=self.root/'experiment.toml';self.save()
         self.out=self.root/'dataset'
@@ -82,6 +84,78 @@ class PlanningContracts(unittest.TestCase):
                 expected=math.dist(self.settings['cameras'][a]['offset_rdf_m'],self.settings['cameras'][b]['offset_rdf_m'])
                 self.assertAlmostEqual(distance,expected,places=10)
         self.assertEqual(len({s['split_group'] for s in plan['samples']}),1)
+
+    def test_reference_subset_plans_vis_geometry_jobs(self):
+        self.settings['reference_subset']={'azimuths_deg':[0,180],'elevations_deg':[25],'radius_scales':[1.2]};self.save()
+        plan=self.plan()
+        with_refs=[s for s in plan['samples'] if 'references' in s]
+        cells={(s['parameters']['azimuth_deg'],s['parameters']['elevation_deg'],s['parameters']['radius_scale']) for s in with_refs}
+        self.assertEqual(cells,{(0,25,1.2),(180,25,1.2)})
+        self.assertEqual(len(with_refs),4)  # every repeat of each cell
+        vis_cam=self.settings['cameras']['vis']
+        def scene_sections(job):
+            return {k:v for k,v in job.items() if k not in ('camera','sensor','renderer','dataset')}
+        for s in with_refs:
+            vis_job=tomllib.loads((self.out/s['cameras']['vis']['job']).read_text())
+            for band in constants.BANDS:
+                ref=s['references'][band]
+                self.assertEqual(ref['job'],f'jobs/{s["sample_id"]}/ref_{band}.toml')
+                job=tomllib.loads((self.out/ref['job']).read_text())
+                real=tomllib.loads((self.out/s['cameras'][band]['job']).read_text())
+                # Geometry: all from the VIS camera.
+                self.assertEqual(job['camera'],vis_job['camera'])
+                self.assertEqual(job['renderer']['resolution'],vis_cam['resolution'])
+                self.assertEqual(ref['camera_to_world'],s['cameras']['vis']['camera_to_world'])
+                optics=job['sensor']['optics']
+                self.assertEqual(optics['projection']['coefficients'],vis_cam['distortion'])
+                self.assertEqual((optics['psf_sigma_px'],ref['psf_sigma_px']),(vis_cam['psf_sigma_px'],)*2)
+                self.assertEqual((ref['profile']['resolution'],ref['profile']['fov_y_deg']),(vis_cam['resolution'],vis_cam['fov_y_deg']))
+                # Intrinsics in pixels equal VIS's; the mm focal follows the band's pitch.
+                pitch=self.settings['cameras'][band]['pixel_pitch_um']
+                self.assertEqual(optics['pixel_pitch_um'],pitch)
+                self.assertAlmostEqual(optics['focal_length_mm']/pitch,vis_job['sensor']['optics']['focal_length_mm']/vis_cam['pixel_pitch_um'],places=12)
+                # Radiometry and detector: the band's own, noise-free.
+                self.assertTrue(job['sensor']['quality']['noise_free'])
+                self.assertFalse(real['sensor']['quality']['noise_free'])
+                outside_geometry=lambda sensor:{k:v for k,v in sensor.items() if k not in ('optics','quality')}
+                self.assertEqual(outside_geometry(job['sensor']),outside_geometry(real['sensor']))
+                self.assertEqual((ref['spectral_mode'],ref['geometry_from'],ref['sensor_expected']),(constants.MODES[band],'vis',job['sensor']))
+                # Scene content: the real band job's, section for section.
+                self.assertEqual(scene_sections(job),scene_sections(real))
+                self.assertEqual({k:v for k,v in job['renderer'].items() if k not in ('resolution','seed')},
+                                 {k:v for k,v in real['renderer'].items() if k not in ('resolution','seed')})
+                self.assertNotEqual(job['renderer']['seed'],real['renderer']['seed'])
+                self.assertNotEqual(job['dataset'].pop('acquisition_index'),real['dataset'].pop('acquisition_index'))
+                self.assertEqual(job['dataset'],real['dataset'])
+
+    def test_reference_subset_leaves_the_triplet_plan_unchanged(self):
+        # Adding the table only adds ref_<band> jobs and references records:
+        # every other planned byte stays as planned without it.
+        plain=self.plan();(self.out).rename(self.root/'plain')
+        self.assertFalse(any('references' in s for s in plain['samples']))
+        self.settings['reference_subset']={'azimuths_deg':[90],'elevations_deg':[5],'radius_scales':[.8]};self.save()
+        with_refs=self.plan()
+        before={p.relative_to(self.root/'plain').as_posix():p.read_bytes() for p in (self.root/'plain').rglob('*') if p.is_file()}
+        after={p.relative_to(self.out).as_posix():p.read_bytes() for p in self.out.rglob('*') if p.is_file()}
+        del before['dataset.plan.json'],after['dataset.plan.json']
+        added=sorted(set(after)-set(before))
+        self.assertEqual(len(added),2*3)
+        self.assertTrue(all(Path(p).name.startswith('ref_') for p in added))
+        self.assertEqual({k:after[k] for k in before},before)
+        for a,b in zip(plain['samples'],with_refs['samples']):
+            b=dict(b);b.pop('references',None)
+            self.assertEqual(a,b)
+
+    def test_reference_subset_values_must_be_sampled(self):
+        cases=[({'azimuths_deg':[0],'elevations_deg':[12],'radius_scales':[.8]},r'reference_subset\.elevations_deg values \[12\] are not in sampling'),
+               ({'azimuths_deg':[45],'elevations_deg':[5],'radius_scales':[.8]},r'reference_subset\.azimuths_deg values \[45\]'),
+               ({'azimuths_deg':[0],'elevations_deg':[5],'radius_scales':[]},r'reference_subset\.radius_scales must be a non-empty list'),
+               ({'azimuths_deg':[0],'elevations_deg':[5]},r'reference_subset\.radius_scales is required'),
+               ({'azimuths_deg':[0],'elevations_deg':[5],'radius_scales':[.8],'repeats':[0]},r'unknown reference_subset')]
+        for subset,message in cases:
+            with self.subTest(subset=subset):
+                self.settings['reference_subset']=subset;self.save()
+                with self.assertRaisesRegex(ValueError,message):settings.read_settings(self.config)
 
     def test_source_change_rejected_without_overwriting_derived_assets(self):
         before=self.plan();solar=self.out/'provenance/solar_test.csv';original=solar.read_bytes()

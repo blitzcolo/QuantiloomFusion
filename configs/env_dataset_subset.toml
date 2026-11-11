@@ -42,6 +42,12 @@ elevations_deg = [12]
 radius_scales = [1.0]
 repeats = 1
 
+# Noise-free co-view references (VIS geometry, each band's response).
+[reference_subset]
+azimuths_deg = [0, 90, 180, 270]
+elevations_deg = [12]
+radius_scales = [1.0]
+
 [[scenes]]
 id = "concrete"
 config = "env_concrete.toml"

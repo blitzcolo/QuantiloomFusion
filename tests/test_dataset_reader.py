@@ -73,6 +73,26 @@ def test_dataset_id_mismatches_detected(tmp_path):
         ds.sample("fixture_s00")
 
 
+def test_reader_references_load_on_the_vis_grid(tmp_path):
+    ds = ThreeBandDataset(build_fixture(tmp_path / "ds", samples=1, references=True))
+    assert [e.references for e in ds.index.entries] == [True]
+    vis = ds.sample("fixture_s00").observations[Band.VIS]
+    refs = ds.references("fixture_s00")
+    assert set(refs) == {Band.VIS, Band.MWIR, Band.LWIR}
+    for band, ref in refs.items():
+        assert ref.geometry == vis.geometry
+        assert ds.load(ref, "rawdn").shape == (vis.geometry.height, vis.geometry.width)
+        assert f"/ref_{band}/" in ref.product("rawdn").path
+
+
+def test_reader_references_absent_for_v1(tmp_path):
+    ds = ThreeBandDataset(build_fixture(tmp_path / "ds", samples=1))
+    assert ds.sample("fixture_s00").references == {}
+    assert [e.references for e in ds.index.entries] == [False]
+    with pytest.raises(KeyError, match="no co-view references"):
+        ds.references("fixture_s00")
+
+
 @pytest.mark.skipif(not DATASET, reason="set QUANTILOOM_TEST_DATASET for real dataset tests")
 def test_real_dataset_reader():
     ds = ThreeBandDataset(DATASET)

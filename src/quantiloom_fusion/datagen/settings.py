@@ -55,7 +55,7 @@ def fixed_pattern(band,c):
 
 def read_settings(path):
     doc=tomllib.loads(path.read_text(encoding="utf-8-sig"))
-    check_keys(doc,{"dataset","sampling","scenes","cameras"},"root")
+    check_keys(doc,{"dataset","sampling","scenes","cameras","reference_subset"},"root")
     d=doc["dataset"]
     check_keys(d,{"name","qt_root","cli","seed","spp","wavelength_samples","thermal_mode","atmosphere_mode","atmosphere_model_pack","solar_ir_policy","daylight_solar_scale","ir_materials","noise_seed_policy","geometry_truth","verification","closure_audit_every"},"dataset")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+",d["name"]):raise ValueError("unsafe dataset name")
@@ -106,6 +106,19 @@ def read_settings(path):
     if any(not -80<e<80 for e in s["elevations_deg"]):raise ValueError("elevation must be in (-80,80)")
     for v in s["radius_scales"]:positive(v,"radius_scale")
     positive(s["repeats"],"repeats",True)
+    if "reference_subset" in doc:
+        # Rig cells (all repeats) that also get noise-free co-view references
+        # rendered with the VIS geometry under each band's response.
+        r=doc["reference_subset"]
+        check_keys(r,{"azimuths_deg","elevations_deg","radius_scales"},"reference_subset")
+        for key in ("azimuths_deg","elevations_deg","radius_scales"):
+            if key not in r:raise ValueError(f"reference_subset.{key} is required")
+            values=r[key]
+            if not isinstance(values,list) or not values or any(isinstance(v,bool) or not isinstance(v,(int,float)) for v in values):
+                raise ValueError(f"reference_subset.{key} must be a non-empty list of numbers")
+            if len(values)!=len(set(values)):raise ValueError(f"duplicate reference_subset.{key}")
+            missing=[v for v in values if v not in s[key]]
+            if missing:raise ValueError(f"reference_subset.{key} values {missing} are not in sampling.{key} {s[key]}")
     names=[]
     for scene in doc["scenes"]:
         check_keys(scene,{"id","config","target","radius_m","overrides","solar_scale","vis_exposure_s"},"scene")

@@ -2,7 +2,7 @@
 [dataset]
 name = "env_subset_a8_e12_v1"
 qt_root = "H:/Quantiloom-Qt"
-cli = "H:/Quantiloom-dev/build/src/app/Release/Quantiloom.exe"
+cli = "H:/Quantiloom-SDK/windows_amd64/bin/Quantiloom.exe"
 seed = 20261006
 spp = 32
 wavelength_samples = 12

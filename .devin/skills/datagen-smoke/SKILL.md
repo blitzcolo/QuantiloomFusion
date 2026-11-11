@@ -15,7 +15,7 @@ allowed-tools:
 
 ```bash
 cd /mnt/d/QuantiloomFusion
-/mnt/h/Quantiloom-dev/build/src/app/Release/Quantiloom.exe --version   # 记录版本
+/mnt/h/Quantiloom-SDK/windows_amd64/bin/Quantiloom.exe --version   # 记录版本
 tasklist.exe | grep -i quantiloom || echo "no renderer running"          # 不要和正式采集抢 GPU
 nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv
 ```

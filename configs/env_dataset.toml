@@ -80,18 +80,18 @@ exchange_top_k = 16
 checkpoint_stride_h = 4
 forcing_file = "../forcing/concrete_day.csv"
 [scenes.overrides.atmosphere]
-preset = "urban_haze"
+preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 atmos_model = 2
-ihaze = 5
+ihaze = 1
 icld = 0
-vis_km = 8
+vis_km = 23
 rainrt_mm_h = 0
 t_ground_K = 300.0
 air_temperature_k = 300.0
 rh = 0.48
 relative_humidity = 48
-p_hPa = 1010
+p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"
 
@@ -124,7 +124,7 @@ model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 atmos_model = 2
 ihaze = 1
 icld = 0
-vis_km = 18
+vis_km = 20
 rainrt_mm_h = 0
 t_ground_K = 296.75
 air_temperature_k = 296.75
@@ -161,6 +161,8 @@ forcing_file = "../forcing/grassland_day.csv"
 preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 t_ground_K = 288.25
+air_temperature_k = 288.25
+rh = 0.655
 
 [[scenes]]
 id = "seaside_night"
@@ -243,18 +245,18 @@ exchange_top_k = 16
 checkpoint_stride_h = 4
 forcing_file = "../forcing/concrete_day.csv"
 [scenes.overrides.atmosphere]
-preset = "urban_haze"
+preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 atmos_model = 2
-ihaze = 5
+ihaze = 1
 icld = 0
-vis_km = 8
+vis_km = 23
 rainrt_mm_h = 0
 t_ground_K = 300.0
 air_temperature_k = 300.0
 rh = 0.48
 relative_humidity = 48
-p_hPa = 1010
+p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"
 
@@ -292,7 +294,7 @@ model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 atmos_model = 2
 ihaze = 1
 icld = 0
-vis_km = 18
+vis_km = 20
 rainrt_mm_h = 0
 t_ground_K = 296.75
 air_temperature_k = 296.75
@@ -334,6 +336,8 @@ forcing_file = "../forcing/grassland_day.csv"
 preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 t_ground_K = 288.25
+air_temperature_k = 288.25
+rh = 0.655
 
 [[scenes]]
 id = "seaside_moonlight"

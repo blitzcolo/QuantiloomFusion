@@ -220,9 +220,9 @@ class PlanningContracts(unittest.TestCase):
 
     def test_one_humidity_key_per_job(self):
         d={'spp':1,'geometry_truth':False,'atmosphere_mode':'source','thermal_mode':'authored','ir_materials':'constant'}
-        base={'atmosphere':{'preset':'urban_haze','rh':0.75,'relative_humidity':50},'materials':[]}
+        base={'atmosphere':{'preset':'clear','rh':0.75,'relative_humidity':50},'materials':[]}
         for band in constants.BANDS:
-            self.assertEqual(scene.scene_for_band(base,band,[],d,None)['atmosphere'],{'preset':'urban_haze','rh':0.75})
+            self.assertEqual(scene.scene_for_band(base,band,[],d,None)['atmosphere'],{'preset':'clear','rh':0.75})
         base['atmosphere']={'preset':'clear','relative_humidity':55}
         self.assertEqual(scene.scene_for_band(base,'lwir',[],d,None)['atmosphere'],{'preset':'clear','relative_humidity':55})
 

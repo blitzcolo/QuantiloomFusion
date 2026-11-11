@@ -48,18 +48,18 @@
 "sky_radiance" = [0.0, 0.0, 0.0]
 "atmosphere_temperature_k" = 284.68
 ["scenes"."overrides"."atmosphere"]
-"preset" = "urban_haze"
+"preset" = "clear"
 "model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
 "atmos_model" = 2
-"ihaze" = 5
+"ihaze" = 1
 "icld" = 0
-"vis_km" = 8
+"vis_km" = 23
 "rainrt_mm_h" = 0
 "t_ground_K" = 300.0
 "air_temperature_k" = 300.0
 "rh" = 0.48
 "relative_humidity" = 48
-"p_hPa" = 1010
+"p_hPa" = 1013.25
 "h2o_scale" = 1
 "sky_model" = "isotropic"
 ["scenes"."overrides"."thermal"]
@@ -92,18 +92,18 @@
 "solar_lut_diffuse_is_global" = true
 "atmosphere_temperature_k" = 284.68
 ["scenes"."overrides"."atmosphere"]
-"preset" = "urban_haze"
+"preset" = "clear"
 "model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
 "atmos_model" = 2
-"ihaze" = 5
+"ihaze" = 1
 "icld" = 0
-"vis_km" = 8
+"vis_km" = 23
 "rainrt_mm_h" = 0
 "t_ground_K" = 300.0
 "air_temperature_k" = 300.0
 "rh" = 0.48
 "relative_humidity" = 48
-"p_hPa" = 1010
+"p_hPa" = 1013.25
 "h2o_scale" = 1
 "sky_model" = "isotropic"
 ["scenes"."overrides"."thermal"]

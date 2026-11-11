@@ -94,7 +94,7 @@ pilot 全分辨率（640×360 / 320×256 / 256×192，SPP 32，`wavelength_sampl
 7. ~~`.clang-tidy`、`.clangd` 是 Quantiloom C++ 仓库的配置，与本仓库无关。~~ 已加入 `.gitignore`（`460a57a`）。
 8. ~~**跨系统重规划失败**（T2.15 发现，重构前就存在）：Windows 与 Linux libm 末位差异使正式配置 549 个任务 TOML 在另一系统上逐字节不同，`plan` 报 "planned file changed"，正式数据集无法跨系统续跑。~~ 已由 `aa07475` 修正：同 `dataset_id` 重规划时保留已存计划与任务文件，容差比对。
 9. 物理待核实：pilot LWIR 元数据 diagnostics 含 "material 'Car_Car_body' legacy scalar IR fractions are constant assumptions extended across camera response [4000, 12000] nm"，而数据集文档称车身绑定 Al n,k。可能只是热求解边界参数的提示，也可能说明 n,k 绑定未生效——需在 Quantiloom 侧核对，不在本仓库修。
-10. 场景待核实：Qt 白天场景的 NN 湿度与其 forcing 不一致——concrete `rh = 0.75`（urban_haze 预设值）而 `concrete_day.csv` 14 时湿度 30.4 %；desert 0.15 对 7.3 %、seaside 0.70 对 68.3 %。热求解读 forcing 的湿度列，只有 NN 大气用 `rh`，所以大气与热平衡描述的不是同一团空气。场景文件属 Quantiloom-Qt，本仓库不改；要统一，可在配置的 `overrides.atmosphere` 里写全白天大气段（改配方，需用户决定）。
+10. 场景待核实：Qt 白天场景的 NN 湿度与其 forcing 不一致——concrete 不写 `rh`（`clear` 预设值 0.50）而 `concrete_day.csv` 14 时湿度 30.4 %；desert 0.15 对 11 时 11.0 %、grassland 0.50（预设）对 10 时 54.1 %、seaside 0.70 对 16 时 68.3 %（2026-11-11 按 Qt `406deb8` 之后的文件重读）。热求解读 forcing 的湿度列，只有 NN 大气用 `rh`，所以大气与热平衡描述的不是同一团空气。场景文件属 Quantiloom-Qt，本仓库不改；要统一，可在配置的 `overrides.atmosphere` 里写全白天大气段（改配方，需用户决定）。
 11. `tests/test_dataset_splits.py::test_real_dataset_single_shared_group` 假设 `QUANTILOOM_TEST_DATASET` 只有一个 `split_group`（pilot），而文档与 skill 指定的测试数据集是 smoke（4 组）：用 `build/env-smoke-0.8.3` 与 `build/env-smoke-0.7.4` 都失败（`assert 4 == 1`）。是测试的既有假设问题，与 0.8.3 无关，待修。
 
 ---
@@ -418,6 +418,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 | 迁移到 Quantiloom 0.8.3 | 完成 | 同一批任务 TOML 与种子分别用 0.7.4、0.8.3 渲染对照（smoke 6 个三元组、pilot 前 3 个），结果见数据集文档"0.7.4 → 0.8.3 迁移对照"。生成器两处修复：只写一个湿度键（`f2b5a22`，0.8.3 smoke 84 个产品与修复前逐像素一致，告警 9 → 0）；`look_at` 放在相机组到目标的距离上（`fa0ea21`，ql_site 首次渲染因 float32 位姿精度被校验拒绝后发现）。文档与 skill 的版本、目录与基线数 `f0a79a9`。`build/env-smoke-0.8.3` 两侧 `verify --inspect-exr` complete=6/6；两侧 `215 passed, 11 skipped`，带真实数据集 `225 passed, 1 failed`（既有问题，见 §2.5 第 11 条） |
 | ql_site 实测扫描场景 | 完成 | `10b0e68` `configs/env_dataset_ql_site.toml`：引用 `H:/LidarPointCloud/out/ql_site/site.mwir.toml`，authored 温度、NN `clear` 大气、8 方位 × 45° × 300 m。`build/env-qlsite-0.8.3-r2` 一次跑完 8/8（7 分 50 秒），`verify --inspect-exr` complete=8/8；闭合审计 rms 2.0/1.8 K。红外是模拟的（只有网格与照片纹理实测），见数据集文档对应小节 |
+| 同步 Quantiloom 0.10.0 与 Qt 场景（2026-11-11） | 进行中 | 夜间/低照度臂大气与白天同预设（concrete clear、desert 20 km、grassland 补 23:00 湿度与气温），四份配置同步；正式配置 `plan` 12 个条目全部通过（`build/_parity/20261111-c1-formal`，2592 三元组，尚未改采样）。23:00 行重新核对：四个场景的 `t_ground_K`/`air_temperature_k`/`rh`/`atmosphere_temperature_k`/`initial_temperature_k` 与重新生成后的 forcing 一致（grassland 原缺 rh 与气温，已补） |
 
 ## 7. 决策记录
 
@@ -450,6 +451,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-26 | 接受 0.8.x 的新缺省：`sky_distribution = "clear"`、非制冷 LWIR 预设 NETD 带宽 15 Hz；不钉旧值 | 两者都更符合物理（后者让相机真正交付配置声明的 50 mK）；铉 `uniform` 也复现不了 0.7.4 的天空像素 |
 | 2026-10-26 | 保留 `lighting.atmosphere_temperature_k`（虽然 0.8.3 告警已弃用） | `atmosphere_mode = "off"` 消融臂关闭 NN 大气后，它仍是热天空回退值 |
 | 2026-10-26 | ql_site 实测扫描场景单独成配置 `configs/env_dataset_ql_site.toml`，不并入正式配置 | 用户要求引用它作融合场景。它没有 `[thermal]`（authored 温度）、采样也不同（俯仰 45°、半径 300 m），并入会改变正式配方；大气从源配置的 disabled 覆盖为 NN `clear` 预设（300 m 斜距下 IR 路径项不可忽略） |
+| 2026-11-11 | 同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的气温、湿度、天空温度随时刻不同；四个场景之间不要求相同 | 用户决定。三种工况的比较才是照度的单变量对照；夜间地表温度来自晴空直射的白天热历史，成像大气要与之自洽。渲染器 0.10.0 对"地面参考太阳谱 + 非晴空"直接报错（低照度臂太阳在地平线上 5°，派生 CSV 保留 ETR 列名，同样受约束）：concrete 夜间/低照度由 urban_haze（8 km、ihaze 5）改为 clear，desert 由 18 km 改为与白天相同的 20 km，grassland 补上 23:00 的 rh 0.655 与气温 288.25 K |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险

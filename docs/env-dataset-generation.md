@@ -107,7 +107,7 @@ NMF RMSE 的物理量级换算：典型 ~0.006 的反射率误差按 ε=1−ρ �
 
 ### 大气：`atmosphere_mode = "source"`
 
-保留场景绑定的大气配置，并新增数据集级 `atmosphere_model_pack` 键把**四个场景统一到同一 NN 模型包**（`H:/Quantiloom-dev/assets/atmos_models`）——大气模型是配方变量，不允许逐场景解析到不同实现；场景之间只保留预设参数差异（urban_haze / turbulent_clear / clear 与各自的 `t_ground_K`、湿度、能见度）。按 `{lwir,mwir,nir,swir,vis} × {ground,slant,sky} × {tau,lpath,ldown}` 组织：路径透射、路径辐射与**天空下行辐射**都由网络给出，LWIR 中 L = εB(T) + (1−ε)L_down 的下行项因此是有模型的，不是常数背景。
+保留场景绑定的大气配置，并新增数据集级 `atmosphere_model_pack` 键把**四个场景统一到同一 NN 模型包**（`H:/Quantiloom-dev/assets/atmos_models`）——大气模型是配方变量，不允许逐场景解析到不同实现；场景之间只保留预设参数差异（concrete、grassland、seaside 为 `clear`，desert 为 `turbulent_clear` 且 `vis_km = 20`，及各自的 `t_ground_K`、湿度）。同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的地表/气温、湿度与天空温度随时刻不同——三种工况之间的比较因此是照度的单变量对照，夜间地表温度所依据的热历史（晴空直射的白天）与成像大气自洽。渲染器 0.10.0 另有一条硬规则（`ConfigResolve.cpp` 的 `ReferenceSunAtmosphereConflict`）：太阳在地平线以上且 `solar_lut` 是地面参考谱（列名含 ETR/extraterrestrial，ASTM G-173 即是）时，大气必须是晴空（`vis_km ≥ 20`、`ihaze = 1`、无云无雨），否则直接报错。生成器派生的太阳谱 CSV 保留原列名，所以低照度臂（太阳仰角 5°）同样受这条规则约束——此前 concrete 夜间/低照度臂沿用的 8 km 城市霾（ihaze 5）与 desert 的 18 km 在 0.10.0 下都会被拒绝。按 `{lwir,mwir,nir,swir,vis} × {ground,slant,sky} × {tau,lpath,ldown}` 组织：路径透射、路径辐射与**天空下行辐射**都由网络给出，LWIR 中 L = εB(T) + (1−ε)L_down 的下行项因此是有模型的，不是常数背景。
 
 **湿度只写一个键**：Quantiloom 0.8 把 `atmosphere.rh`（分数，NN 输入）与 `atmosphere.relative_humidity`（百分数）解析为同一个湿度，两者都给且不一致时告警，并用 `rh` 同时驱动 NN 与热平衡。Qt 白天场景两键并存且不一致（concrete 0.75 对 50 %、desert 0.15 对 50 %、seaside 0.70 对 50 %），生成器在两键并存时只保留 `rh`，任务 TOML 写的就是渲染器实际使用的湿度。数值不变：NN 自 0.7.4 起就读 `rh`，热求解逐行读 forcing CSV 的湿度列（四份 `*_day.csv` 都是含湿度的 8 列格式）。
 
@@ -153,7 +153,7 @@ NN 包在 CPU 烘焙时以太阳天顶角为输入：天顶角 >85° 判定夜�
 
 ### 夜间臂（VIS 失效工况）
 
-四个 `*_night` 变体在相同相机组几何下提供 VIS 失效对照：太阳/天空 RGB 辐亮度置零、`solar_lut` 移除、热求解到 23 时，**大气段同步换成 23 时 forcing 行**（地表/气温、湿度、以及普朗克天空回退用的 `atmosphere_temperature_k` 取 forcing 的天空辐射温度而非白天值），太阳方向取 23 时真实的地平线下位置（NN 烘焙由此判定夜间、太阳散射项归零）。红外天空下行辐射不受影响：MWIR/LWIR 的天空项走 NN `ldown`（再回退解析晴空、再回退大气温度普朗克），零星的 RGB `sky_radiance` 只管 VIS 解析天空——这是源码级确认，不是推断。**注意 `atmosphere_temperature_k` 的语义分叉**：NN 大气激活时配置解析会把 `T_air` 覆写为大气段的 `t_ground_K`（发射率归一化需要真实气温），该键只在普朗克回退路径上生效——热求解的宽频下行辐照度与渲染的天空辐射因此来自不同口径，对账见"验证记录"。
+四个 `*_night` 变体在相同相机组几何下提供 VIS 失效对照：太阳/天空 RGB 辐亮度置零、`solar_lut` 移除、热求解到 23 时，**大气段沿用白天条目的预设（气溶胶类型与能见度），只把随时刻变化的量换成 23 时 forcing 行**（地表/气温、湿度、以及普朗克天空回退用的 `atmosphere_temperature_k` 取 forcing 的天空辐射温度而非白天值），太阳方向取 23 时真实的地平线下位置（NN 烘焙由此判定夜间、太阳散射项归零）。红外天空下行辐射不受影响：MWIR/LWIR 的天空项走 NN `ldown`（再回退解析晴空、再回退大气温度普朗克），零星的 RGB `sky_radiance` 只管 VIS 解析天空——这是源码级确认，不是推断。**注意 `atmosphere_temperature_k` 的语义分叉**：NN 大气激活时配置解析会把 `T_air` 覆写为大气段的 `t_ground_K`（发射率归一化需要真实气温），该键只在普朗克回退路径上生效——热求解的宽频下行辐照度与渲染的天空辐射因此来自不同口径，对账见"验证记录"。
 
 smoke 实测（64×36，0.7.4）：夜间 VIS rawdn 均值 2.1、中位 0 对白天中位 118（均值 108，灯具/灯牌高亮尾巴抬升）；夜间 LWIR 有效像素 `tapp` 均值 298.2 K（真值 300.0）。两点口径修正：**(1)** 天空像素的表观温度约 **295 K**——这不是 NN `ldown` 本身，而是着色器把天顶 NN `ldown`（8–12 µm 带内等效亮温约 264 K）经平流层模型 `L_sky(θ)=B_air·[1−(1−ε0)^sec θ]` 向地平线延拓的结果，近地平线天空逼近 `T_air`=300 K（即 `t_ground_K`）的厚层极限。**(2)** 早版"最低表观温度 284.6 K ≈ forcing 天空温度 284.68 K"的记录是 0.7.2 采样缺陷积分后的巧合，不是 `ldown` 生效的证据；`ldown` 为 NN 输出的结论是**由闭合检验证实**的（见"验证记录"：对高发射率漫反射面，τ·[εB(T_s)+(1−ε)L_down]+L_path 与 corrected 信号闭合到约 0.3–0.7 K（镜面路径变体），NETD 量级）。这提供了"融合增益必须来自 IR"的可检验条件。雾/霾条件可通过大气预设以同样的 `overrides` 机制追加；当前正式配置未含。
 
@@ -457,7 +457,7 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 
 | 能力 | 说明 | 本数据集 |
 | --- | --- | --- |
-| 大气预设 | clear / turbulent_clear / urban_haze / fog / light_rain / heavy_rain / snow / haze / disabled | 场景自带（urban_haze、turbulent_clear、clear），数据集级统一到同一 NN 包 |
+| 大气预设 | clear / turbulent_clear / urban_haze / fog / light_rain / heavy_rain / snow / haze / disabled | 场景自带（clear、turbulent_clear；白天只有晴空），数据集级统一到同一 NN 包 |
 | NN 大气包 | 按 波段×几何×量（tau/lpath/ldown）组织的 safetensors 网络；CPU 烘焙以太阳天顶角为输入，训练域天顶 ≤85°：>85° 非热波段 lpath 归零（0.7.3） | 使用中（全部四场景，含夜间/月光变体） |
 | 单波长烘焙 | 相机网格单 λ 大气量取该波长 Voronoi 胞（相邻采样中点为界）内全部 NN 通道的盒平均，胞宽计入烘焙缓存哈希（0.7.4）；非网格单 λ 取 ±2 nm 窗盒平均、无通道时取波数最近通道（0.7.3 修复，此前静默归零——LWIR 通道间距 6.4–14.4 nm 会大面积落空） | 使用中（相机波长积分路径） |
 | 太阳散射缩放 | `atmosphere.solar_scatter_scale`：MWIR 只缩放显式 SOL_SCAT 分量，VIS/NIR/SWIR 缩放整项合并 lpath（无独立散射输出、热发射可忽略），LWIR 热路径发射不缩放（0.7.3 新增） | 使用中（月光臂 2e-6） |

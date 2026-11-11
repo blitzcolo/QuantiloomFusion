@@ -59,7 +59,7 @@
 
 ### 场景变体（`overrides`）
 
-`[[scenes]]` 条目可带 `overrides` 表、`solar_scale` 和 `vis_exposure_s` 三个可选键。覆盖按**整个命名段**替换：写一个 `[scenes.overrides.lighting]` 等于整体替换场景 TOML 的 `[lighting]` 表，不做字段级合并——被省略的键回到场景文件或加载器默认值，不会残留原值。`*_night` 变体以此完整重写 `[lighting]`（太阳/天空辐亮度置零、太阳改为 23 时真实的地平线下方向、移除 `solar_lut`）、`[thermal]`（同一 forcing 文件，求解到 23 时）与 `[atmosphere]`（同一大气预设，但 `t_ground_K`/`air_temperature_k`/湿度取 forcing 文件 23 时那一行，不沿用白天值）。`*_moonlight` 变体额外使用 `solar_scale`（作用于派生太阳表，见"低照度臂"）与 `vis_exposure_s`（VIS 长曝光）。删除变体条目即回到 192 样本的纯白天集。
+`[[scenes]]` 条目可带 `overrides` 表、`solar_scale` 和 `vis_exposure_s` 三个可选键。覆盖按**整个命名段**替换：写一个 `[scenes.overrides.lighting]` 等于整体替换场景 TOML 的 `[lighting]` 表，不做字段级合并——被省略的键回到场景文件或加载器默认值，不会残留原值。`*_night` 变体以此完整重写 `[lighting]`（太阳/天空辐亮度置零、太阳改为 23 时真实的地平线下方向、移除 `solar_lut`）、`[thermal]`（同一 forcing 文件，求解到 23 时）与 `[atmosphere]`（同一大气预设，但 `t_ground_K`/`air_temperature_k`/湿度取 forcing 文件 23 时那一行，不沿用白天值）。`*_moonlight` 变体额外使用 `solar_scale`（作用于派生太阳表，乘在白天的幅度对齐之上，见"低照度臂"与"白天太阳谱的幅度"）与 `vis_exposure_s`（VIS 长曝光）。删除变体条目即回到 192 样本的纯白天集。
 
 ## 物理建模
 
@@ -132,6 +132,23 @@ NN 包在 CPU 烘焙时以太阳天顶角为输入：天顶角 >85° 判定夜�
 源 ASTM G173 表只覆盖到 4 µm。`"planck_tail"`（必填键，无代码默认值）以 4 µm 末行锚定 5778 K 普朗克形状延伸到 15 µm，各辐照度列分别延伸；派生表按 `%.12e` 固定格式写出，保证两个系统下逐字节一致。**该尾部穿过 4.2–4.4 µm CO₂ 吸收带与 5–8 µm 水汽带，会高估 MWIR 上段的太阳反射分量**。量级估算：3–5 µm 地表太阳辐照度约 10 W/m²，漫反射率 ρ≈0.15 的地物反射辐亮度约 0.4 W/m²·sr，而 318 K 的带内热辐亮度约 3 W/m²·sr——受照区域的反射太阳项约占热发射的 **10% 量级**，4 µm 附近两者甚至可比，并非先前估计的不足 1%。这意味着普朗克尾的近似误差与"日间 MWIR 是否有显著太阳分量"这个消融变量同量级，MWIR 波段消融结论不应建立在它之上；补齐 MODTRAN DATA 或构建 libRadtran 太阳表的优先级相应提高（见下方 QLTrans 段）。
 
 **QLTrans（仓库自带的 MODTRAN 封装）本应是自洽的替代路径**——它内嵌 MODTRAN4 可执行体，且 NN 大气本身就用 MODTRAN 系数据训练，两者同源才一致。实测结论是**当前检出缺 MODTRAN 分子带模型 DATA 文件**（`MOD4v1r1.EXE` 在，但 DATA 目录不含所需波段模型文件；MODTRAN 数据文件不可再分发），QLTrans 磁带能生成、辐射计算无法执行。`reference-only/libRadtran-2.0.6` 在仓库内但只有源码未构建。所以本版本保留 `planck_tail` 并把它标注为显式近似；补齐 MODTRAN DATA 或构建 libRadtran 后按场景各生成一张 0.28–15 µm 太阳表即可替换，属明确后续工作。夜间变体无 `solar_lut`（无太阳项），月光臂的太阳表是同一份派生表再乘 `solar_scale`。选择 `"source"` 则保持原表不延伸（>4 µm 无太阳项）。
+
+### 白天太阳谱的幅度：`daylight_solar_scale = "forcing_direct"`
+
+渲染用的太阳谱是 ASTM G-173（太阳天顶角 48.2°、AM1.5 的地面参考谱，直射+环日列在 280–4000 nm 上的梯形积分 900.14 W/m²），幅度不随场景变化；热求解用的是 Quantiloom-Qt 的 forcing 文件，其直射辐照度随太阳高度变化（`scripts/gen_env_forcing.py`：1158·exp(−浑浊度·大气质量)）。不处理的话，海边场景（16 时、太阳高度 21.1°、forcing 直射 664.4 W/m²）里照亮画面的太阳比加热地表的太阳强三分之一。
+
+`"forcing_direct"`（必填键，无代码默认值；`"none"` 不缩放）让生成器对每个带 `solar_lut` 的条目计算 scale = forcing 文件在场景采集时刻的直射辐照度 ÷ 参考谱直射列（`solar_lut_columns` 的第一项）在原表上的积分，乘进派生太阳谱 CSV 的每一列；采集时刻与 forcing 文件取**源场景 TOML** 的 `[thermal] time_h`/`forcing_file`（低照度臂的覆盖项把 `[thermal]` 换成了 23 时，取的仍是场景构图的那个白天时刻）。低照度臂的 `solar_scale = 2e-6` 乘在这个之上；夜间条目没有太阳表，不涉及。NN 路径辐射的太阳散射缩放（`atmosphere.solar_scatter_scale`）只跟随低照度的 2e-6，不跟随这个幅度对齐。派生 CSV 保留原列名（渲染器靠列名识别地面参考谱并执行晴空规则）。计划的 `scenes[].assumptions` 记录 `solar_scale` 与 `solar_scale_derivation`（两侧直射值、时刻、参考列、对齐比、臂系数）。
+
+正式配置实测（`build/_parity/20261111-c3-formal`）：
+
+| 场景 | 采集时刻 | forcing 直射 W/m² | scale |
+| --- | --- | --- | --- |
+| concrete | 14 h | 933.5 | 1.0371 |
+| desert | 11 h | 981.9 | 1.0908 |
+| grassland | 10 h | 910.3 | 1.0113 |
+| seaside | 16 h | 664.4 | 0.7381 |
+
+这只对齐幅度，不改谱形：G-173 的谱形对应 AM1.5，海边 21° 太阳（AM≈2.8）的真实直射谱更偏红，这部分没有建模。渲染器推导的短波吸收率是反射率按太阳谱加权的比值，不受幅度影响。
 
 ### 噪声与随机种子：`noise_seed_policy = "per_acquisition"`
 

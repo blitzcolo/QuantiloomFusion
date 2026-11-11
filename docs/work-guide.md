@@ -418,7 +418,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | T5.1–T5.4 | 未开始 | 全量采集放在子集之后、用新目录 |
 | 迁移到 Quantiloom 0.8.3 | 完成 | 同一批任务 TOML 与种子分别用 0.7.4、0.8.3 渲染对照（smoke 6 个三元组、pilot 前 3 个），结果见数据集文档"0.7.4 → 0.8.3 迁移对照"。生成器两处修复：只写一个湿度键（`f2b5a22`，0.8.3 smoke 84 个产品与修复前逐像素一致，告警 9 → 0）；`look_at` 放在相机组到目标的距离上（`fa0ea21`，ql_site 首次渲染因 float32 位姿精度被校验拒绝后发现）。文档与 skill 的版本、目录与基线数 `f0a79a9`。`build/env-smoke-0.8.3` 两侧 `verify --inspect-exr` complete=6/6；两侧 `215 passed, 11 skipped`，带真实数据集 `225 passed, 1 failed`（既有问题，见 §2.5 第 11 条） |
 | ql_site 实测扫描场景 | 完成 | `10b0e68` `configs/env_dataset_ql_site.toml`：引用 `H:/LidarPointCloud/out/ql_site/site.mwir.toml`，authored 温度、NN `clear` 大气、8 方位 × 45° × 300 m。`build/env-qlsite-0.8.3-r2` 一次跑完 8/8（7 分 50 秒），`verify --inspect-exr` complete=8/8；闭合审计 rms 2.0/1.8 K。红外是模拟的（只有网格与照片纹理实测），见数据集文档对应小节 |
-| 同步 Quantiloom 0.10.0 与 Qt 场景（2026-11-11） | 进行中 | 夜间/低照度臂大气与白天同预设（concrete clear、desert 20 km、grassland 补 23:00 湿度与气温），四份配置同步；正式配置 `plan` 12 个条目全部通过（`build/_parity/20261111-c1-formal`，2592 三元组）。采样改为 8 方位 × 俯仰 12°/25° × 3 距离：`plan` 报 576 三元组 / 1728 次采集，每条目 48 个（`build/_parity/20261111-c2-formal`），按 0.8.3 吞吐外推约 6.9 GPU 小时（见 §2.2）。23:00 行重新核对：四个场景的 `t_ground_K`/`air_temperature_k`/`rh`/`atmosphere_temperature_k`/`initial_temperature_k` 与重新生成后的 forcing 一致（grassland 原缺 rh 与气温，已补） |
+| 同步 Quantiloom 0.10.0 与 Qt 场景（2026-11-11） | 进行中 | 夜间/低照度臂大气与白天同预设（concrete clear、desert 20 km、grassland 补 23:00 湿度与气温），四份配置同步；正式配置 `plan` 12 个条目全部通过（`build/_parity/20261111-c1-formal`，2592 三元组）。采样改为 8 方位 × 俯仰 12°/25° × 3 距离：`plan` 报 576 三元组 / 1728 次采集，每条目 48 个（`build/_parity/20261111-c2-formal`），按 0.8.3 吞吐外推约 6.9 GPU 小时（见 §2.2）。白天太阳谱按 forcing 直射缩放（`daylight_solar_scale = "forcing_direct"`，生成器从 forcing 与 LUT 算）：concrete 1.0371、desert 1.0908、grassland 1.0113、seaside 0.7381，低照度臂再乘 2e-6，记入计划 `scenes[].assumptions.solar_scale_derivation`（`build/_parity/20261111-c3-formal`）。23:00 行重新核对：四个场景的 `t_ground_K`/`air_temperature_k`/`rh`/`atmosphere_temperature_k`/`initial_temperature_k` 与重新生成后的 forcing 一致（grassland 原缺 rh 与气温，已补） |
 
 ## 7. 决策记录
 
@@ -452,6 +452,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-26 | 保留 `lighting.atmosphere_temperature_k`（虽然 0.8.3 告警已弃用） | `atmosphere_mode = "off"` 消融臂关闭 NN 大气后，它仍是热天空回退值 |
 | 2026-10-26 | ql_site 实测扫描场景单独成配置 `configs/env_dataset_ql_site.toml`，不并入正式配置 | 用户要求引用它作融合场景。它没有 `[thermal]`（authored 温度）、采样也不同（俯仰 45°、半径 300 m），并入会改变正式配方；大气从源配置的 disabled 覆盖为 NN `clear` 预设（300 m 斜距下 IR 路径项不可忽略） |
 | 2026-11-11 | 同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的气温、湿度、天空温度随时刻不同；四个场景之间不要求相同 | 用户决定。三种工况的比较才是照度的单变量对照；夜间地表温度来自晴空直射的白天热历史，成像大气要与之自洽。渲染器 0.10.0 对"地面参考太阳谱 + 非晴空"直接报错（低照度臂太阳在地平线上 5°，派生 CSV 保留 ETR 列名，同样受约束）：concrete 夜间/低照度由 urban_haze（8 km、ihaze 5）改为 clear，desert 由 18 km 改为与白天相同的 20 km，grassland 补上 23:00 的 rh 0.655 与气温 288.25 K |
+| 2026-11-11 | 白天太阳谱按 forcing 直射缩放（scale = forcing 采集时刻直射 ÷ 参考谱直射列积分，由生成器计算）；不把海边采集时刻挪到太阳更高时 | 用户决定（挪时刻是备选）。只对齐幅度、不改谱形；NN 太阳散射缩放只跟随低照度 2e-6——幅度对齐不是照度工况的改变 |
 | 2026-10-12 | torch 索引由 cu126 改为 cu128，且只对 Windows 生效 | 与 paper-exp 一致（同版本、同索引，显存测量可比）；Linux 的 PyPI wheel 已带 CUDA |
 
 ## 8. 待决问题与风险

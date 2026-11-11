@@ -39,7 +39,7 @@ class RunDatasetContracts(unittest.TestCase):
             'materials':[{'name':'Object','ir_emissivity':.9}]}))
         self.settings = settings.read_settings(ROOT/'configs/env_dataset.toml')
         self.settings['dataset'].update(cli=self.cli.as_posix(),qt_root=self.root.as_posix(),verification='hashes',
-            thermal_mode='authored',ir_materials='constant',geometry_truth=False)
+            thermal_mode='authored',ir_materials='constant',geometry_truth=False,daylight_solar_scale='none')
         self.settings['sampling'].update(azimuths_deg=[0,90],elevations_deg=[5],radius_scales=[1.0],repeats=1)
         self.settings['scenes'] = [{'id':'test','config':scene_toml.as_posix()}]
         self.config = self.root/'experiment.toml'

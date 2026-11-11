@@ -10,6 +10,7 @@
 "atmosphere_mode" = "source"
 "atmosphere_model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
 "solar_ir_policy" = "planck_tail"
+"daylight_solar_scale" = "forcing_direct"
 "ir_materials" = "spectral"
 "noise_seed_policy" = "per_acquisition"
 "geometry_truth" = true

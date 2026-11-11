@@ -1,8 +1,45 @@
-"""Solar spectrum derivation: Planck-tail extension and low-light scaling."""
+"""Solar spectrum derivation: Planck-tail extension, forcing-matched and low-light scaling."""
 
 import csv
 import io
 import math
+
+
+def reference_direct(source, column):
+    """Trapezoid integral (W/m2) of one irradiance column of a solar LUT.
+
+    column is the renderer's 1-based solar_lut_columns index (1 = wavelength,
+    so ASTM G-173's direct+circumsolar is 4). Integrated over the published
+    table only: the Planck tail is a modelling extension, not the reference."""
+    if type(column) is not int or column<2:raise ValueError(f'solar_lut column must be an integer >= 2, got {column!r}')
+    with source.open(encoding="utf-8-sig") as f:
+        rows=[row for row in csv.reader(f)][1:]
+    values=[(float(row[0]),float(row[column-1])) for row in rows if row]
+    if len(values)<2:raise ValueError(f'{source}: solar LUT needs at least two rows')
+    return sum((w1-w0)*(e0+e1)/2 for (w0,e0),(w1,e1) in zip(values,values[1:]))
+
+
+def forcing_direct(path, time_h):
+    """Direct-beam irradiance (W/m2) of a thermal forcing CSV at time_h.
+
+    Column 3 is sun_irradiance_w_m2 (time_h, air_temperature_k,
+    sun_irradiance_w_m2, ...); comment lines start with '#', and a header is
+    tolerated on the first line, as the renderer's loader does. Between rows
+    the value is interpolated linearly."""
+    rows=[]
+    for i,line in enumerate(path.read_text(encoding="utf-8-sig").splitlines()):
+        line=line.strip()
+        if not line or line.startswith('#'):continue
+        cells=line.split(',')
+        try:rows.append((float(cells[0]),float(cells[2])))
+        except(ValueError,IndexError):
+            if rows:raise ValueError(f'{path}: unreadable forcing row {i+1}: {line!r}')
+    rows.sort()
+    for (t0,e0),(t1,e1) in zip(rows,rows[1:]):
+        if t0<=time_h<=t1:
+            return e0 if t1==t0 else e0+(e1-e0)*(time_h-t0)/(t1-t0)
+    if rows and rows[-1][0]==time_h:return rows[-1][1]
+    raise ValueError(f'{path}: time_h {time_h} outside the forcing rows')
 
 
 def solar_extension(source, destination, scale=1.0):

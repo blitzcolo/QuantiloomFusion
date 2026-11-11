@@ -61,7 +61,8 @@ def _fake_dataset(root: Path) -> Path:
         "materials": [{"name": "Object", "ir_emissivity": 0.9}]}))
     s = settings.read_settings(ROOT / "configs/env_dataset.toml")
     s["dataset"].update(cli=cli.as_posix(), qt_root=root.as_posix(), verification="hashes",
-        thermal_mode="authored", ir_materials="constant", geometry_truth=False)
+        thermal_mode="authored", ir_materials="constant", geometry_truth=False,
+        daylight_solar_scale="none")
     s["sampling"].update(azimuths_deg=[0], elevations_deg=[5], radius_scales=[1.0], repeats=1)
     s["scenes"] = [{"id": "test", "config": scene_toml.as_posix()}]
     config = root / "experiment.toml"

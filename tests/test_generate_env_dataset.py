@@ -49,7 +49,7 @@ class PlanningContracts(unittest.TestCase):
         # The fixture scene carries no [thermal] or spectral bindings, so the
         # formal config's solved/spectral policies cannot run against it.
         self.settings['dataset'].update(cli=self.cli.as_posix(),qt_root=self.root.as_posix(),verification='hashes',
-            thermal_mode='authored',ir_materials='constant',geometry_truth=False)
+            thermal_mode='authored',ir_materials='constant',geometry_truth=False,daylight_solar_scale='none')
         self.settings['sampling'].update(azimuths_deg=[0,90,180],elevations_deg=[5,25],radius_scales=[.8,1.2],repeats=2)
         self.settings['scenes']=[{'id':'test','config':self.scene.as_posix()}]
         self.config=self.root/'experiment.toml';self.save()
@@ -203,6 +203,42 @@ class PlanningContracts(unittest.TestCase):
         self.assertEqual(job['lighting'],plan3['scenes'][0]['overrides']['lighting'])
         # solar_lut absent from a wholesale-replaced section -> no derived CSV
         self.assertEqual(plan3['scenes'][0]['assumptions']['ir_solar_tail'],'source CSV unchanged')
+
+    def test_daylight_solar_scale_matches_forcing_beam(self):
+        # LUT direct column: (4000-400)*(1+0.01)/2 = 1818 W/m2; forcing beam at
+        # 12 h interpolates 500 and 900 to 700 W/m2.
+        (self.root/'day.csv').write_text('# preamble\n#time_h,air,sun\n10.0,290,500.0,0,30,270,50,40\n14.0,300,900.0,0,50,280,60,30\n')
+        doc=tomllib.loads(self.scene.read_text())
+        doc['lighting']['solar_lut_columns']=[2,3]
+        doc['thermal']={'enabled':True,'time_h':12.0,'forcing_file':'day.csv'}
+        self.scene.write_text(tomlio.toml_text(doc))
+        self.settings['dataset']['daylight_solar_scale']='forcing_direct'
+        night={'lighting':{'sun_direction':[0,-1,0]},'thermal':{'enabled':True,'time_h':23.0,'forcing_file':'day.csv'}}
+        self.settings['scenes']=[{'id':'test','config':self.scene.as_posix()},
+            {'id':'test_low','config':self.scene.as_posix(),'solar_scale':2e-6},
+            {'id':'test_night','config':self.scene.as_posix(),'overrides':night}]
+        self.save();p=self.plan()
+        info={s['id']:s for s in p['scenes']}
+        ratio=700/1818
+        day=info['test']['assumptions']
+        self.assertAlmostEqual(day['solar_scale'],ratio,places=12)
+        self.assertEqual({k:day['solar_scale_derivation'][k] for k in ('policy','time_h','reference_column','arm_scale')},
+                         {'policy':'forcing_direct','time_h':12.0,'reference_column':2,'arm_scale':1.0})
+        self.assertAlmostEqual(day['solar_scale_derivation']['forcing_direct_w_m2'],700.0,places=9)
+        self.assertAlmostEqual(day['solar_scale_derivation']['reference_direct_w_m2'],1818.0,places=9)
+        # The low-light factor multiplies the forcing match; the night arm has no sun.
+        self.assertAlmostEqual(info['test_low']['assumptions']['solar_scale'],2e-6*ratio,delta=1e-18)
+        self.assertEqual(info['test_night']['assumptions']['solar_scale'],1.0)
+        rows=(self.out/'provenance/solar_test.csv').read_text().splitlines()
+        self.assertEqual(rows[0],'nm,direct,global')  # the renderer reads column labels
+        self.assertAlmostEqual(float(rows[1].split(',')[1]),ratio,places=11)
+        low=(self.out/'provenance/solar_test_low.csv').read_text().splitlines()
+        self.assertAlmostEqual(float(low[1].split(',')[1]),2e-6*ratio,delta=1e-17)
+        self.assertFalse((self.out/'provenance/solar_test_night.csv').exists())
+        # A lit scene without a forcing file cannot be matched to one.
+        del doc['thermal'];self.scene.write_text(tomlio.toml_text(doc))
+        self.out=self.root/'dataset2'
+        with self.assertRaisesRegex(ValueError,'forcing_file and time_h'):self.plan()
 
     def test_pose_survives_float32_far_from_origin(self):
         # The renderer rebuilds the view basis in float32 from look_at - position.

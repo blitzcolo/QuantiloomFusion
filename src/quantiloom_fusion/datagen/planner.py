@@ -18,7 +18,7 @@ from .renderer import QuantiloomCli
 from .scene import canonicalize, read_gltf, reject_motion, resolve_asset, scene_for_band
 from .sensor import sensor_config
 from .settings import positive, read_settings
-from .solar import solar_extension
+from .solar import forcing_direct, reference_direct, solar_extension
 
 
 def _agrees(a,b,path=''):
@@ -65,6 +65,9 @@ def plan(config: Path,out: Path,renderer=None):
         source=resolve_asset(definition["config"],qt/'assets/configs',qt,cli_root)
         assets.add(source)
         base=tomllib.loads(source.read_text(encoding="utf-8-sig"))
+        # The hour a scene was composed for lives in its own [thermal], which a
+        # night or low-light override replaces; keep it for the solar scale.
+        source_thermal=dict(base.get('thermal',{}))
         # Scene overrides replace whole named sections (write the complete
         # [lighting]/[thermal]/... table in the settings, not a patch of it).
         for key,value in definition.get("overrides",{}).items():base[key]=value
@@ -87,11 +90,35 @@ def plan(config: Path,out: Path,renderer=None):
         solar_scale=definition.get('solar_scale',1.0)
         if not isinstance(solar_scale,(int,float)) or isinstance(solar_scale,bool) or not math.isfinite(solar_scale) or solar_scale<=0:
             raise ValueError(f'scene {definition["id"]}: solar_scale must be a positive number')
-        if solar_scale!=1.0 and base.get("atmosphere"):
+        arm_scale=solar_scale
+        if arm_scale!=1.0 and base.get("atmosphere"):
             # The NN path radiance is baked for the unscaled sun: the same
             # factor applied to the solar LUT must damp its solar-scatter
-            # term, or a scaled-sun scene gets an unscaled twilight fog.
-            base["atmosphere"]["solar_scatter_scale"]=solar_scale
+            # term, or a scaled-sun scene gets an unscaled twilight fog. The
+            # forcing match below only aligns the LUT's amplitude with the
+            # beam that heated the ground, so it does not touch the NN.
+            base["atmosphere"]["solar_scatter_scale"]=arm_scale
+        derivation={'policy':d['daylight_solar_scale']}
+        lighting=base.get('lighting',{})
+        if d['daylight_solar_scale']=='forcing_direct' and lighting.get('solar_lut'):
+            # The reference LUT has one fixed beam (G-173: ~900 W/m2 at AM1.5)
+            # while the thermal solve heats the ground with the forcing file's
+            # beam at the scene's hour; scale the LUT to that beam so the sun
+            # that lights the frame is the sun that warmed it. A ratio, so the
+            # renderer's derived short-wave absorptivity is unchanged.
+            if not source_thermal.get('forcing_file') or 'time_h' not in source_thermal:
+                raise ValueError(f'scene {definition["id"]}: daylight_solar_scale="forcing_direct" needs [thermal] forcing_file and time_h in {source.name}')
+            columns=lighting.get('solar_lut_columns')
+            if not isinstance(columns,list) or not columns:
+                raise ValueError(f'scene {definition["id"]}: daylight_solar_scale="forcing_direct" needs lighting.solar_lut_columns')
+            forcing=resolve_asset(source_thermal['forcing_file'],source.parent,qt,cli_root);assets.add(forcing)
+            lut=native_path(lighting['solar_lut'])
+            measured=forcing_direct(forcing,float(source_thermal['time_h']))
+            reference=reference_direct(lut,columns[0])
+            derivation.update(forcing_file=canonical_path(forcing),time_h=float(source_thermal['time_h']),forcing_direct_w_m2=measured,
+                reference_lut=canonical_path(lut),reference_column=columns[0],reference_direct_w_m2=reference,
+                forcing_ratio=measured/reference,arm_scale=arm_scale)
+            solar_scale=arm_scale*measured/reference
         if (d['solar_ir_policy']=='planck_tail' or solar_scale!=1.0) and base.get('lighting',{}).get('solar_lut'):
             solar=out/'provenance'/('solar_'+definition['id']+'.csv')
             # The source hash is part of the frozen recipe; this derived file is
@@ -105,7 +132,7 @@ def plan(config: Path,out: Path,renderer=None):
             'ir_refractive_index':('scene nk bindings kept only where source data covers the band; bound materials otherwise use measured reflectance' if d['ir_materials']=='spectral'
                                   else 'scene/default real index; source nk bindings omitted in IR'),
             'ir_solar_tail':'5778 K Planck shape anchored to final source CSV row' if solar else 'source CSV unchanged',
-            'solar_scale':solar_scale,
+            'solar_scale':solar_scale,'solar_scale_derivation':derivation,
             'vis_response':'authored generic RGB QE curves, Bayer RGGB; not measured camera calibration'}})
         for ai,ei,ri,rep in product(range(len(settings['sampling']['azimuths_deg'])),range(len(settings['sampling']['elevations_deg'])),range(len(settings['sampling']['radius_scales'])),range(settings['sampling']['repeats'])):
             az=settings['sampling']['azimuths_deg'][ai];el=settings['sampling']['elevations_deg'][ei];rs=settings['sampling']['radius_scales'][ri]

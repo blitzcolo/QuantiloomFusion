@@ -24,6 +24,8 @@ atmosphere_mode = "source"
 atmosphere_model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 # The site's ASTM G-173 table ends at 4 um; the Planck tail covers MWIR/LWIR.
 solar_ir_policy = "planck_tail"
+# No forcing file (authored temperatures): the reference sun is used as is.
+daylight_solar_scale = "none"
 ir_materials = "spectral"
 noise_seed_policy = "per_acquisition"
 geometry_truth = true

@@ -14,6 +14,10 @@ atmosphere_mode = "source"
 atmosphere_model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 # Labelled modelling assumption extending the source solar CSV beyond 4 um.
 solar_ir_policy = "planck_tail"
+# Scale the reference solar LUT (ASTM G-173, ~900 W/m2 direct) to the
+# forcing file's direct beam at the scene's hour, so the sun that lights
+# the frame is the sun that heated the ground. Derived by the generator.
+daylight_solar_scale = "forcing_direct"
 # constant: strip spectral bindings in IR, authored emissivity only.
 # spectral: merged library bindings render measured spectra in every band.
 ir_materials = "spectral"

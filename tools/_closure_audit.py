@@ -267,6 +267,10 @@ def invert_many(l_spec, lam_grid, lam_w):
     return 0.5 * (lo + hi)
 
 
+# Mirror-direction zenith bins [lo, hi) in degrees; the last bin is open-ended.
+MIRROR_ZENITH_BINS = ((0.0, 30.0), (30.0, 60.0), (60.0, 75.0), (75.0, 1e9))
+
+
 def stats(r, m):
     return f"n={m.sum():5d} bias={r[m].mean():+7.3f} K rms={np.sqrt((r[m] ** 2).mean()):7.3f} K"
 
@@ -435,6 +439,15 @@ def main():
         if interior.sum() >= 3:
             line += f" | interior cos_i>0.5: specular {stats(r_spec, interior)}, isotropic {stats(r_iso, interior)}"
         print(line)
+        # Directional-Fresnel residual by the zenith angle of the mirror direction
+        # (angle from world +Y): the slab sky is steepest near the horizon.
+        mz = np.degrees(np.arccos(np.clip(refl[idx, 1], -1.0, 1.0)))
+        parts = []
+        for lo_d, hi_d in MIRROR_ZENITH_BINS:
+            mb = (mz >= lo_d) & (mz < hi_d)
+            label = f"{lo_d:.0f}-{hi_d:.0f}" if hi_d < 1e3 else f"{lo_d:.0f}+"
+            parts.append(f"{label} {stats(r_spec, mb)}" if mb.any() else f"{label} n=    0")
+        print(f"  {name:<28} mirror-zenith bins (deg), specular: " + " | ".join(parts))
     for mid in sorted(unknown_ids):
         m = base & (flat == mid)
         if m.sum() >= 3:

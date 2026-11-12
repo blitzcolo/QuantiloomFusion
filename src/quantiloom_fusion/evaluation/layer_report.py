@@ -9,7 +9,15 @@ source corresponds there.  Reported groups:
   source-referenced metrics, each band counted only inside its own support.
 * ``occluded_oov`` (occluded + out_of_view): no source has information, so the
   correct behaviour is to fall back to the reference band.  Source metrics are
-  not defined there; the deviation from the reference band is the score.
+  not defined there.  The score is the deviation from the reference band in
+  the high-pass component (``hp_dev_*``), by distance to the source
+  footprint: a multiresolution spline deliberately carries the low
+  frequencies (the bands' brightness difference included) some 32 px past a
+  footprint edge, and that transition is not ghosting -- ghosting is high-
+  frequency structure brought in by misregistration.  The full-signal
+  difference stays as a control column (``fullsig_dev_*``).  On samples with
+  co-view references the truth-referenced metrics are the answer there: the
+  references have real IR content in the occluded region.
 
 No-reference metrics carry the ``ctx_`` prefix: they are context only and are
 never a dependent variable of registration sensitivity.
@@ -36,6 +44,10 @@ LAYER_GROUPS: dict[str, tuple[Layer, ...]] = {
 }
 SOURCE_METRIC_KEYS = ("SCD", "Qabf", "MS_SSIM")
 MS_SSIM_MARGIN_PX = 32
+HP_SIGMA_PX = 2.0
+FOOTPRINT_DISTANCE_BINS_PX: tuple[tuple[float, float], ...] = (
+    (0.0, 4.0), (4.0, 8.0), (8.0, 16.0), (16.0, 32.0), (32.0, float("inf")),
+)
 _NAN = float("nan")
 
 
@@ -86,13 +98,49 @@ def source_ref_metrics(view: FusedView, mask: np.ndarray) -> dict[str, float]:
             "MS_SSIM": ms_ssim_fusion_n(view.fused, srcs, mask=m, supports=eroded)}
 
 
-def reference_deviation(view: FusedView, mask: np.ndarray) -> dict[str, float]:
-    """Deviation of the fused image from the reference band on ``mask``."""
+def _bin_key(lo: float, hi: float) -> str:
+    return f"d{lo:g}_{'inf' if np.isinf(hi) else f'{hi:g}'}"
+
+
+def _highpass(image: np.ndarray, sigma_px: float) -> np.ndarray:
+    img = np.asarray(image, np.float64)
+    return img - ndimage.gaussian_filter(img, sigma_px, mode="reflect")
+
+
+def reference_deviation(view: FusedView, mask: np.ndarray, hp_sigma_px: float = HP_SIGMA_PX) -> dict[str, float]:
+    """Deviation of the fused image from the reference band on ``mask``.
+
+    ``hp_dev_RMSE``: RMS of the difference of the two images' high-pass
+    components (each minus the same Gaussian low-pass of sigma
+    ``hp_sigma_px``), overall and per bin of distance (px) to the source
+    footprint (the pixels every non-reference band supports): ``(lo, hi]``
+    from ``FOOTPRINT_DISTANCE_BINS_PX``, with the pixel count beside it, plus
+    ``inside`` (distance 0): pixels of ``mask`` the registration did sample
+    the sources at -- in the occluded layer, where its warp put source
+    content the source cannot have seen.
+    ``fullsig_dev_*``: the full-signal difference, which mostly measures the
+    pyramid's deliberate low-frequency transition -- a control, not ghosting.
+    """
+    bins = {"inside": (-1.0, 0.0)} | {_bin_key(lo, hi): (lo, hi) for lo, hi in FOOTPRINT_DISTANCE_BINS_PX}
+    row = {"hp_sigma_px": float(hp_sigma_px)}
     if not mask.any():
-        return {"dev_RMSE": _NAN, "dev_MAE": _NAN, "dev_PSNR": _NAN}
-    diff = (view.fused - view.sources[view.reference])[mask].astype(np.float64)
-    return {"dev_RMSE": float(np.sqrt(np.mean(diff**2))), "dev_MAE": float(np.mean(np.abs(diff))),
-            "dev_PSNR": psnr(view.fused[mask], view.sources[view.reference][mask])}
+        return row | dict.fromkeys(["fullsig_dev_RMSE", "fullsig_dev_MAE", "fullsig_dev_PSNR", "hp_dev_RMSE",
+                                    *(f"hp_dev_RMSE_{k}" for k in bins)], _NAN) | {f"n_{k}": 0 for k in bins}
+    fused = np.asarray(view.fused, np.float64)
+    ref = np.asarray(view.sources[view.reference], np.float64)
+    diff = (fused - ref)[mask]
+    row |= {"fullsig_dev_RMSE": float(np.sqrt(np.mean(diff**2))), "fullsig_dev_MAE": float(np.mean(np.abs(diff))),
+            "fullsig_dev_PSNR": psnr(fused[mask], ref[mask])}
+    hp = _highpass(fused, hp_sigma_px) - _highpass(ref, hp_sigma_px)
+    row["hp_dev_RMSE"] = float(np.sqrt(np.mean(hp[mask] ** 2)))
+    others = [s for b, s in view.supports.items() if b != view.reference]
+    footprint = np.logical_and.reduce(others) if others else np.ones(mask.shape, bool)
+    dist = ndimage.distance_transform_edt(~footprint) if footprint.any() else np.full(mask.shape, np.inf)
+    for key, (lo, hi) in bins.items():
+        sel = mask & (dist > lo) & (dist <= hi)
+        row[f"hp_dev_RMSE_{key}"] = float(np.sqrt(np.mean(hp[sel] ** 2))) if sel.any() else _NAN
+        row[f"n_{key}"] = int(sel.sum())
+    return row
 
 
 def layer_metrics(view: FusedView, group: str, mask: np.ndarray) -> dict[str, float]:

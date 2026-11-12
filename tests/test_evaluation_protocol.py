@@ -7,7 +7,16 @@ from scipy import ndimage
 from test_geometry_oracle import geometry, raycast
 
 from quantiloom_fusion.core.bands import BANDS, Band
-from quantiloom_fusion.evaluation.layer_report import FusedView, combine_layers, layer_masks, source_ref_metrics
+from quantiloom_fusion.evaluation.layer_report import (
+    FOOTPRINT_DISTANCE_BINS_PX,
+    FusedView,
+    combine_layers,
+    layer_masks,
+    reference_deviation,
+    source_ref_metrics,
+)
+from quantiloom_fusion.fusion import aligned_sources
+from test_fusion_align import _input
 from quantiloom_fusion.geometry import Layer, layer_map, oracle_warp
 from quantiloom_fusion.geometry.warp import Warp
 from quantiloom_fusion.evaluation.perturb import smooth_field_warp
@@ -188,9 +197,62 @@ def test_layers_partition_and_occluded_layer_reports_deviation_from_reference_ba
     assert not (masks["correspondable"] & masks["occluded_oov"]).any()
     assert masks["correspondable"].any() and masks["occluded_oov"].any()
     good = _row(evaluate_point(scene, create("max_abs"), scene.oracle_warps, None), "occluded_oov")
-    assert good["dev_RMSE"] < 1e-6 and np.isnan(good["SCD"])
+    assert good["fullsig_dev_RMSE"] < 1e-6 and good["hp_dev_RMSE"] < 1e-2 and np.isnan(good["SCD"])
     bad = _row(evaluate_point(scene, Constant(), scene.oracle_warps, None), "occluded_oov")
-    assert bad["dev_RMSE"] > 0.05
+    assert bad["fullsig_dev_RMSE"] > 0.05
+    assert good["hp_sigma_px"] == 2.0
+
+
+_H, _W = 160, 240
+
+
+def _deviation(vis, ir, support, shift=0.0):
+    j, i = np.meshgrid(np.arange(_W), np.arange(_H))
+    warp = Warp(Band.VIS, Band.LWIR, np.dstack([j + shift, i]).astype(np.float64), support.copy())
+    x = _input({Band.VIS: vis, Band.LWIR: ir}, {Band.LWIR: warp})
+    sources, supports = aligned_sources(x)
+    fused = create("laplacian_pyramid_masked").fuse(x).image
+    return FusedView(fused, sources, supports, Band.VIS)
+
+
+def _footprint_with_seam():
+    rect = np.zeros((_H, _W), bool)
+    rect[40:120, 60:180] = True
+    seam = rect.copy()
+    seam[40:120, 118:121] = False  # a 3 px occlusion slit inside the footprint
+    return rect, seam
+
+
+def test_high_pass_deviation_ignores_the_pyramids_low_frequency_transition():
+    # Flat bands: nothing to ghost. The full-signal deviation is the
+    # deliberate ~32 px brightness transition; the high-pass one is ~0.
+    _, seam = _footprint_with_seam()
+    view = _deviation(np.full((_H, _W), 0.05, np.float32), np.full((_H, _W), 0.55, np.float32), seam)
+    rect, _ = _footprint_with_seam()
+    row = reference_deviation(view, ~seam)
+    for lo, hi in FOOTPRINT_DISTANCE_BINS_PX:
+        key = f"d{lo:g}_{'inf' if np.isinf(hi) else f'{hi:g}'}"
+        assert row[f"n_{key}"] > 0
+        assert row[f"hp_dev_RMSE_{key}"] < 0.005, key
+    slit = reference_deviation(view, rect & ~seam)
+    assert slit["fullsig_dev_RMSE"] > 0.1 and slit["hp_dev_RMSE"] < 0.005
+
+
+def test_high_pass_deviation_rises_where_misregistration_brings_structure_into_occlusion():
+    # Perfect registration knows the slit is occluded; a 2 px misregistered
+    # warp whose support covers the slit (as a homography's would) samples
+    # source structure into it.
+    rect, seam = _footprint_with_seam()
+    rng = np.random.default_rng(1)
+    vis = (0.2 + 0.5 * ndimage.gaussian_filter(rng.random((_H, _W)), 1.5)).astype(np.float32)
+    ir = (0.2 + 0.5 * ndimage.gaussian_filter(rng.random((_H, _W)), 1.5)).astype(np.float32)
+    slit = rect & ~seam
+    aligned = reference_deviation(_deviation(vis, ir, seam), slit)
+    ghosted = reference_deviation(_deviation(vis, ir, rect, shift=2.0), slit)
+    assert ghosted["hp_dev_RMSE"] > 5 * aligned["hp_dev_RMSE"]
+    # The misregistered warp sampled the slit: it is inside its footprint.
+    assert ghosted["n_inside"] == slit.sum() and aligned["n_inside"] == 0
+    assert ghosted["hp_dev_RMSE_inside"] == ghosted["hp_dev_RMSE"]
 
 
 def test_combined_layer_is_the_worst_over_sources():

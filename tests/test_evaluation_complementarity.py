@@ -5,6 +5,7 @@ from dataset_fixture import build_fixture
 from quantiloom_fusion.dataset.reader import ThreeBandDataset
 from quantiloom_fusion.dataset.splits import leave_one_group_out
 from quantiloom_fusion.dataset.types import Condition
+from quantiloom_fusion.evaluation.complementarity import pixel_masks
 from quantiloom_fusion.evaluation.complementarity_contrast import (
     band_radiance,
     boundary_contrast,
@@ -14,11 +15,13 @@ from quantiloom_fusion.evaluation.complementarity_contrast import (
 from quantiloom_fusion.evaluation.complementarity_stats import (
     FrameId,
     PairArrays,
-    blocked_folds,
+    RegressionScores,
     cmi_estimate,
     folds_for_condition,
     pair_frame,
+    r2_vs_zero,
     regression_scores,
+    view_group_folds,
 )
 
 LWIR_NM = (8000.0, 12000.0)
@@ -166,7 +169,52 @@ def test_folds_from_real_leave_one_group_out_on_fixture(tmp_path):
     assert all(set(f.test_ids).isdisjoint(f.train_ids) for f in folds)
 
 
-def test_blocked_folds_partition_one_group_and_are_labelled_within_group():
-    folds = blocked_folds([f"s{i}" for i in range(8)], "g", 2)
-    assert [f.kind for f in folds] == ["within_group_blocked"] * 2
-    assert sorted(s for f in folds for s in f.test_ids) == [f"s{i}" for i in range(8)]
+def test_null_emissivity_pixels_stay_in_regression_but_not_in_contrast():
+    shape = (2, 3)
+    temp = np.full(shape, 300.0)
+    eps = np.array([[0.9, np.nan, 0.8], [np.nan, 0.9, 0.9]])
+    label = np.array([[0, 1, 2], [1, 0, 2]])
+    feats = np.ones(shape + (2,))
+    warp_valid = np.ones(shape, bool)
+    warp_valid[1, 2] = False
+    regression, contrast = pixel_masks(warp_valid, temp, eps, label, feats, feats)
+    assert regression.sum() == 5
+    assert contrast.sum() == 3
+    assert regression[0, 1] and regression[1, 0]
+    assert not contrast[0, 1] and not contrast[1, 0]
+    assert not np.any(contrast & ~regression)
+    assert not regression[1, 2]
+
+
+def test_r2_is_one_minus_sse_over_zero_predictor_variance():
+    s = RegressionScores(n_test=10, var_total=4.0, ridge_vis=2.0, ridge_both=1.0, knn_vis=8.0, knn_both=4.0)
+    assert s.r2_ridge_vis == pytest.approx(0.5)
+    assert s.r2_ridge_both == pytest.approx(0.75)
+    assert s.r2_knn_vis == pytest.approx(-1.0)
+    assert s.r2_knn_both == 0.0
+    assert r2_vs_zero(4.0, 4.0) == 0.0
+    frames = _frames("none")
+    zero = regression_scores(frames[:6], frames[6:])
+    assert zero.r2_ridge_vis == pytest.approx(1 - zero.ridge_vis / zero.var_total)
+    assert zero.r2_ridge_vis > 0.5
+
+
+def test_view_group_folds_never_share_a_view_group_between_train_and_test():
+    samples = [(f"s{az}_{k}", float(az)) for az in (0, 45, 90, 135) for k in range(3)]
+    azimuth = dict(samples)
+    folds = view_group_folds(samples, "g")
+    assert len(folds) == 4
+    assert {f.kind for f in folds} == {"within_scene_view"}
+    assert sorted(s for f in folds for s in f.test_ids) == sorted(s for s, _ in samples)
+    for f in folds:
+        assert {azimuth[s] for s in f.train_ids}.isdisjoint({azimuth[s] for s in f.test_ids})
+        assert len(f.test_ids) == 3 and len(f.train_ids) == 9
+        assert f.train_groups == f.test_groups == ("g",)
+
+
+def test_view_group_folds_blocks_group_contiguous_azimuths_and_need_two_groups():
+    samples = [(f"s{az}", float(az)) for az in range(0, 360, 45)]
+    folds = view_group_folds(samples, "g", blocks=2)
+    assert [f.test_views for f in folds] == [("0+45+90+135",), ("180+225+270+315",)]
+    assert set(folds[0].test_ids).isdisjoint(folds[0].train_ids)
+    assert view_group_folds([("a", 0.0), ("b", 0.0)], "g") == []

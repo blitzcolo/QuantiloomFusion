@@ -9,7 +9,13 @@ Targets are ``truth_surface_temperature`` (never ``tapp``) and the truth
 material class of the IR band. Regression target is the per-frame de-meaned
 surface temperature. LWIR inputs are the apparent temperature, de-meaned
 per frame the same way. All results are separate per illumination condition,
-with cross-validation folds (leave-one-group-out by split_group) in the result.
+with cross-validation folds in the result: leave-one-group-out by split_group
+(cross-scene) and leave-one-view-group-out inside each scene (within-scene).
+
+Masks: temperature regression and conditional mutual information use every
+correspondable pixel with a valid temperature, material and features. Only the
+contrast decomposition also needs a finite band emissivity; materials defined by
+optical constants (sea water, bare metal) have none and enter everything else.
 """
 
 from __future__ import annotations
@@ -34,11 +40,11 @@ from .complementarity_stats import (
     PairArrays,
     PairFrame,
     RegressionScores,
-    blocked_folds,
     cmi_for_fold,
     folds_for_condition,
     pair_frame,
     regression_scores,
+    view_group_folds,
 )
 
 L_DOWN_MODES = ("none", "scene_mean")
@@ -55,7 +61,7 @@ class AnalysisSettings:
     knn_k: int = 20
     cmi_bins: CmiBins = field(default_factory=CmiBins)
     cmi_permutations: int = 20
-    within_group_folds: int = 2
+    view_group_blocks: int | None = None  # None: one view group per distinct azimuth
 
 
 @dataclass(frozen=True)
@@ -69,10 +75,14 @@ class FoldResult:
 @dataclass(frozen=True)
 class ConditionResult:
     condition: Condition
-    mode: str  # 'logo' or 'within_group_blocked' (NOT cross-scene)
+    mode: str  # 'logo' (cross-scene folds exist) or 'none' (single split_group)
     group_samples: dict[str, tuple[str, ...]]  # split_group -> sample ids of this condition
     group_assets: dict[str, str]  # split_group -> asset name
-    folds: tuple[FoldResult, ...]
+    folds: tuple[FoldResult, ...]  # leave-one-group-out (cross-scene); empty without mode 'logo'
+    within_scene_folds: dict[str, tuple[FoldResult, ...]]  # split_group -> leave-one-view-group-out
+    n_regression_pixels: int  # pixels entering regression/CMI (before subsampling)
+    n_contrast_pixels: int  # of those, pixels with a finite emissivity (contrast decomposition)
+    null_emissivity_pixels: dict[str, int]  # material name -> regression pixels without emissivity
     contrast: dict[str, BoundaryContrast]  # by L_down mode, pooled over the condition
     contrast_by_group: dict[str, dict[str, BoundaryContrast]]
 
@@ -113,6 +123,28 @@ def _lwir_features(tapp: np.ndarray) -> np.ndarray:
 class _BuiltFrame:
     frame: PairFrame
     contrast: dict[str, BoundaryContrast]
+    n_regression: int
+    n_contrast: int
+    null_emissivity: dict[int, int]  # material label code -> pixels without emissivity
+
+
+def pixel_masks(
+    warp_valid: np.ndarray,
+    temp: np.ndarray,
+    eps: np.ndarray,
+    label: np.ndarray,
+    x_vis: np.ndarray,
+    x_lwir: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """(regression mask, contrast mask); the latter additionally needs a finite emissivity."""
+    regression = (
+        warp_valid
+        & (temp > 0)
+        & (label >= 0)
+        & np.isfinite(x_vis).all(axis=2)
+        & np.isfinite(x_lwir).all(axis=2)
+    )
+    return regression, regression & np.isfinite(eps)
 
 
 def _build_frame(
@@ -147,22 +179,22 @@ def _build_frame(
     ratio = src.geometry.width / ref.geometry.width
     x_vis_full = apply_warp(_vis_features(rgb, ratio), warp)
     x_lwir_full = _lwir_features(tapp)
-    valid = (
-        warp.valid
-        & (temp > 0)
-        & np.isfinite(eps)
-        & (label >= 0)
-        & np.isfinite(x_vis_full).all(axis=2)
-        & np.isfinite(x_lwir_full).all(axis=2)
-    )
+    valid, contrast_valid = pixel_masks(warp.valid, temp, eps, label, x_vis_full, x_lwir_full)
     contrast = {}
     for mode in L_DOWN_MODES:
-        l_down = float(band_radiance(temp[valid].mean(), band_nm)) if mode == "scene_mean" else 0.0
-        contrast[mode] = boundary_contrast(temp, eps, label, valid, band_nm, l_down)
+        l_down = (
+            float(band_radiance(temp[contrast_valid].mean(), band_nm))
+            if mode == "scene_mean" and contrast_valid.any()
+            else 0.0
+        )
+        contrast[mode] = boundary_contrast(temp, eps, label, contrast_valid, band_nm, l_down)
+    codes, counts = np.unique(label[valid & ~contrast_valid], return_counts=True)
+    null_eps = {int(c): int(n) for c, n in zip(codes, counts, strict=True)}
     ident = FrameId(sample.sample_id, sample.split_group, sample.condition)
     arrays = PairArrays(temp[valid], x_vis_full[valid], x_lwir_full[valid], label[valid])
     rng = np.random.default_rng([settings.seed, index])
-    return _BuiltFrame(pair_frame(ident, arrays, settings.max_px_per_frame, rng), contrast)
+    frame = pair_frame(ident, arrays, settings.max_px_per_frame, rng)
+    return _BuiltFrame(frame, contrast, int(valid.sum()), int(contrast_valid.sum()), null_eps)
 
 
 def _evaluate_fold(
@@ -182,6 +214,7 @@ def analyse_dataset(
     settings = settings or AnalysisSettings()
     samples = list(dataset)
     meta = {s.sample_id: (s.split_group, s.condition) for s in samples}
+    azimuth = {s.sample_id: float(s.parameters.azimuth_deg) for s in samples}
     assets = {s.split_group: _asset_of(s) for s in samples}
     groups = tuple(dict.fromkeys(s.split_group for s in samples))
     logo = leave_one_group_out(dataset)
@@ -197,12 +230,18 @@ def analyse_dataset(
         ids = [s.sample_id for s in samples if s.condition == condition]
         if not ids:
             continue
-        if len(groups) > 1:
-            folds = folds_for_condition(logo, meta, condition)
-        else:
-            ordered = sorted(ids, key=lambda i: next(s for s in samples if s.sample_id == i).parameters.azimuth_deg)
-            folds = blocked_folds(ordered, groups[0], settings.within_group_folds)
+        folds = folds_for_condition(logo, meta, condition) if len(groups) > 1 else []
         group_samples = {g: tuple(i for i in ids if meta[i][0] == g) for g in groups}
+        within = {
+            g: view_group_folds([(i, azimuth[i]) for i in group_samples[g]], g, settings.view_group_blocks)
+            for g in groups
+            if group_samples[g]
+        }
+        code_name = {c: n for n, c in name_codes.items()}
+        null_px: dict[str, int] = {}
+        for i in ids:
+            for c, n in built[i].null_emissivity.items():
+                null_px[code_name[c]] = null_px.get(code_name[c], 0) + n
         by_group = {
             g: {m: sum((built[i].contrast[m] for i in group_samples[g]), BoundaryContrast()) for m in L_DOWN_MODES}
             for g in groups
@@ -211,10 +250,14 @@ def analyse_dataset(
         total = {m: sum((by_group[g][m] for g in by_group), BoundaryContrast()) for m in L_DOWN_MODES}
         results[condition] = ConditionResult(
             condition,
-            folds[0].kind if folds else "none",
+            "logo" if folds else "none",
             {g: v for g, v in group_samples.items() if v},
             {g: assets[g] for g in group_samples if group_samples[g]},
             tuple(_evaluate_fold(f, frames, settings, rng) for f in folds),
+            {g: tuple(_evaluate_fold(f, frames, settings, rng) for f in fs) for g, fs in within.items()},
+            sum(built[i].n_regression for i in ids),
+            sum(built[i].n_contrast for i in ids),
+            dict(sorted(null_px.items())),
             total,
             by_group,
         )

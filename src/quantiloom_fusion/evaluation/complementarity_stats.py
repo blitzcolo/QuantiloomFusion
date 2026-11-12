@@ -9,7 +9,13 @@
   biased upward by roughly (|Y|-1)(|L|-1)|V| / (2N); the null mean estimates that
   bias for the actual cell counts. Neighbouring pixels are autocorrelated, so
   the effective N is smaller than the pixel count and the null under-covers.
-* Folds: leave-one-group-out by split_group, filtered per condition.
+* Folds: leave-one-group-out by split_group, filtered per condition, plus the
+  within-scene leave-one-view-group-out split (view group = samples sharing an
+  azimuth, or a contiguous block of azimuths).
+* R^2 is always 1 - SSE / sum(y^2) with y the per-frame de-meaned target: the
+  reference is the zero predictor, i.e. predicting every held-out frame's own
+  mean surface temperature. It is not the training mean; negative R^2 means the
+  model is worse than that reference.
 """
 
 from __future__ import annotations
@@ -120,6 +126,30 @@ class RegressionScores:
     knn_vis: float
     knn_both: float
 
+    @property
+    def r2_ridge_vis(self) -> float:
+        return r2_vs_zero(self.ridge_vis, self.var_total)
+
+    @property
+    def r2_ridge_both(self) -> float:
+        return r2_vs_zero(self.ridge_both, self.var_total)
+
+    @property
+    def r2_knn_vis(self) -> float:
+        return r2_vs_zero(self.knn_vis, self.var_total)
+
+    @property
+    def r2_knn_both(self) -> float:
+        return r2_vs_zero(self.knn_both, self.var_total)
+
+
+def r2_vs_zero(mse: float, var_total: float) -> float:
+    """R^2 = 1 - SSE/SS_total against the zero predictor of the de-meaned target.
+
+    Both arguments are means over the same held-out pixels, so the pixel count cancels.
+    """
+    return 1.0 - mse / var_total
+
 
 def regression_scores(
     train: Sequence[PairFrame], test: Sequence[PairFrame], alpha: float = 1.0, k: int = 20
@@ -225,13 +255,18 @@ def cmi_for_fold(
 
 @dataclass(frozen=True)
 class Fold:
-    """kind is 'logo' (cross-scene) or 'within_group_blocked' (NOT cross-scene)."""
+    """kind is 'logo' (cross-scene) or 'within_scene_view' (NOT cross-scene).
+
+    For 'within_scene_view', train_groups == test_groups == (scene group,) and
+    test_views names the held-out view group(s); train and test never share one.
+    """
 
     kind: str
     train_groups: tuple[str, ...]
     test_groups: tuple[str, ...]
     train_ids: tuple[str, ...]
     test_ids: tuple[str, ...]
+    test_views: tuple[str, ...] = ()
 
 
 def folds_for_condition(
@@ -251,12 +286,29 @@ def folds_for_condition(
     return folds
 
 
-def blocked_folds(ordered_ids: Sequence[str], group: str, n_folds: int) -> list[Fold]:
-    """Contiguous blocks of one group's (azimuth-ordered) samples: NOT a cross-scene split."""
-    blocks = np.array_split(np.arange(len(ordered_ids)), n_folds)
+def view_group_folds(
+    samples: Sequence[tuple[str, float]], group: str, blocks: int | None = None
+) -> list[Fold]:
+    """Leave-one-view-group-out inside one scene group: NOT a cross-scene split.
+
+    samples are (sample_id, azimuth_deg). A view group is the set of samples sharing
+    an azimuth (they differ only in elevation/distance); with ``blocks`` the sorted
+    distinct azimuths are cut into that many contiguous blocks instead. Each fold
+    holds out exactly one view group, so no view group is ever in both train and test.
+    Fewer than two view groups give no fold.
+    """
+    azimuths = sorted({az for _, az in samples})
+    if blocks is not None:
+        parts = [list(p) for p in np.array_split(np.array(azimuths), min(blocks, len(azimuths)))]
+    else:
+        parts = [[az] for az in azimuths]
+    if len(parts) < 2:
+        return []
     folds = []
-    for b in blocks:
-        test = tuple(ordered_ids[i] for i in b)
-        train = tuple(s for s in ordered_ids if s not in test)
-        folds.append(Fold("within_group_blocked", (group,), (group,), train, test))
+    for part in parts:
+        held = set(part)
+        test = tuple(s for s, az in samples if az in held)
+        train = tuple(s for s, az in samples if az not in held)
+        label = "+".join(f"{az:g}" for az in part)
+        folds.append(Fold("within_scene_view", (group,), (group,), train, test, (label,)))
     return folds

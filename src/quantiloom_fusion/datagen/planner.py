@@ -54,9 +54,16 @@ def plan(config: Path,out: Path,renderer=None):
     qt=native_path(d["qt_root"]).resolve();cli=native_path(d["cli"]).resolve()
     if not cli.is_file():raise FileNotFoundError(f"CLI not found: {cli}")
     cli_root=next((p for p in cli.parents if (p/'assets').is_dir() and (p/'src').is_dir()),cli.parent)
-    # Renderer binaries are observed, not gated: the CLI version string is the
-    # compatibility contract, so a same-version rebuild must not force a new
-    # dataset. Scene assets still gate by content hash.
+    # The renderer's identity gates by more than its version string: the
+    # executable's content hash and the digest of the shader set it loads
+    # (share/quantiloom/shaders/spirv/SHADERSET beside an installed SDK). With
+    # no source tree next to an installed CLI, physics_sources is empty, so a
+    # same-version rebuild would otherwise pass as the same renderer. The
+    # remaining binaries beside it are observed for provenance only.
+    shaderset=cli.parent.parent/'share'/'quantiloom'/'shaders'/'spirv'/'SHADERSET'
+    renderer_identity={'cli_sha256':digest(cli),
+        'shaderset':shaderset.read_text(encoding='utf-8').strip() if shaderset.is_file() else None,
+        'shaderset_path':canonical_path(shaderset) if shaderset.is_file() else None}
     renderer_files={cli,*cli.parent.glob('*.spv'),*cli.parent.glob('*.dll')}
     if (cli.parent/'usd').is_dir():renderer_files.add(cli.parent/'usd')
     assets=set()
@@ -235,7 +242,7 @@ def plan(config: Path,out: Path,renderer=None):
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
     version=(renderer or QuantiloomCli(cli)).version()
     files=generator_files()
-    recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':generator_fingerprint(files),'generator_files':files,
+    recipe={'settings':settings,'sources':closure,'cli_version':version,'renderer':renderer_identity,'generator_sha256':generator_fingerprint(files),'generator_files':files,
             'physics_sources':physics_sources,
             'derived_assets':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in derived.items()}}
     identity=fingerprint(recipe)
@@ -247,6 +254,9 @@ def plan(config: Path,out: Path,renderer=None):
     references=sum(len(s.get('references',{})) for s in samples)
     extra=f' (+{references} reference renders)' if references else ''
     stored=load_json(destination) if destination.exists() else None
+    if stored is not None and stored['dataset_id']!=identity and stored['recipe'].get('renderer')!=renderer_identity:
+        raise ValueError(f'existing dataset was planned with a different renderer executable or shader set '
+                         f'({stored["recipe"].get("renderer")} vs {renderer_identity}); choose a new output directory')
     if stored is not None and stored['dataset_id']!=identity:
         raise ValueError('existing dataset has a different recipe, source asset, CLI version or generator fingerprint; choose a new output directory')
     if stored is not None:

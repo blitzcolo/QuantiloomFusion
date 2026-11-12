@@ -221,6 +221,21 @@ class PlanningContracts(unittest.TestCase):
         with patch.object(renderer.subprocess,'check_output',return_value='Quantiloom 0.7.1\n'):
             with self.assertRaisesRegex(ValueError,'different recipe'):planner.plan(self.config,self.out)
 
+    def test_renderer_executable_and_shader_set_gate_within_same_cli_version(self):
+        # An installed SDK layout: bin/Quantiloom.exe and share/quantiloom/...
+        cli=self.root/'bin'/'Quantiloom.exe';cli.parent.mkdir();cli.write_bytes(b'build A')
+        shaderset=self.root/'share/quantiloom/shaders/spirv/SHADERSET';shaderset.parent.mkdir(parents=True)
+        shaderset.write_text('aaaa\n')
+        self.settings['dataset']['cli']=cli.as_posix();self.save()
+        renderer_id=self.plan()['recipe']['renderer']
+        self.assertEqual(renderer_id,{'cli_sha256':hashlib.sha256(b'build A').hexdigest(),'shaderset':'aaaa',
+                                      'shaderset_path':paths.canonical_path(shaderset)})
+        self.plan()  # unchanged renderer resumes
+        cli.write_bytes(b'build B')  # same --version string, different binary
+        with self.assertRaisesRegex(ValueError,'different renderer executable or shader set'):self.plan()
+        cli.write_bytes(b'build A');shaderset.write_text('bbbb\n')
+        with self.assertRaisesRegex(ValueError,'different renderer executable or shader set'):self.plan()
+
     def test_physics_source_change_rejected_within_same_cli_version(self):
         # A same-version rebuild that edits physics-relevant sources must not
         # resume a dataset: that is exactly the pre/post-fix mixing the

@@ -49,6 +49,30 @@ def test_layers_cover_grid_and_correspondable_equals_oracle_valid(name):
     warp = oracle_warp(ref, src, ref_band=Band.VIS, src_band=Band.LWIR)
     np.testing.assert_array_equal(layers == Layer.CORRESPONDABLE, warp.valid)
     assert warp.valid.any()
+    # The fusion support puts the edge band back: only occluded and
+    # out-of-view pixels (and invalid ones) are left out.
+    np.testing.assert_array_equal(np.isin(layers, [Layer.EDGE, Layer.CORRESPONDABLE]), warp.support & (ref.validity == 1))
+
+
+def test_sky_both_cameras_see_joins_the_support_at_infinity():
+    # A patch of misses in both views: the ref rays map rotation-only into
+    # the source (the infinity homography), and only where all 4 source
+    # neighbours are misses too.
+    ref, src = scene()
+    ref = with_validity(ref, slice(10, 20), slice(10, 30), 0)
+    src = with_validity(src, slice(0, 48), slice(0, 40), 0)
+    warp = oracle_warp(ref, src, ref_band=Band.VIS, src_band=Band.LWIR)
+    sky = ref.validity == 0
+    assert warp.support[sky].all() and not warp.valid[sky].any()
+    assert (layer_map(ref, src)[sky] == Layer.INVALID).all()
+    x, y = warp.map_xy[sky][:, 0], warp.map_xy[sky][:, 1]
+    assert x.max() < 39  # inside the source's miss patch
+    # Rotation-only: a 0.05 rad yaw shifts every sky pixel by about f*tan(0.05).
+    shift = x - np.argwhere(sky)[:, 1]
+    assert np.ptp(shift) < 0.6 and abs(abs(shift.mean()) - 96.0 * np.tan(0.05)) < 0.6
+    # Without a miss in the source the sky is not supported.
+    bare = oracle_warp(ref, scene()[1], ref_band=Band.VIS, src_band=Band.LWIR)
+    assert not bare.support[sky].any()
 
 
 def test_invalid_precedes_every_other_layer():

@@ -21,7 +21,7 @@ def aligned_sources(x: FusionInput) -> tuple[dict[Band, np.ndarray], dict[Band, 
 
     Returns (images, supports): the reference passes through with an
     all-True support; every other band is sampled through its warp with
-    "linear" interpolation, support = warp.valid & finite output, and
+    "linear" interpolation, support = warp.support & finite output, and
     unsupported pixels filled with the reference value. Raises ValueError
     when a non-reference band has no warp.
     """
@@ -40,11 +40,11 @@ def aligned_sources(x: FusionInput) -> tuple[dict[Band, np.ndarray], dict[Band, 
                 f"warp for {band} yields grid {warped.shape[:2]}, reference is {ref_img.shape[:2]}"
             )
         if warped.ndim == 3:
-            support = x.warps[band].valid & np.isfinite(warped).all(axis=-1)
+            support = x.warps[band].support & np.isfinite(warped).all(axis=-1)
             fill = ref_img if ref_img.ndim == 3 else ref_img[..., None]
             images[band] = np.where(support[..., None], warped, fill)
         else:
-            support = x.warps[band].valid & np.isfinite(warped)
+            support = x.warps[band].support & np.isfinite(warped)
             if ref_img.ndim != 2:
                 raise ValueError("cannot fill a greyscale band with an RGB reference")
             images[band] = np.where(support, warped, ref_img)

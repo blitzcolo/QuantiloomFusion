@@ -12,7 +12,7 @@ import numpy as np
 
 from ..core.bands import Band
 from ..dataset.types import CameraGeometry, Observation
-from .camera import BrownConradyCamera, to_camera
+from .camera import BrownConradyCamera, pixel_grid, to_camera
 
 if TYPE_CHECKING:
     from ..dataset.reader import ThreeBandDataset
@@ -20,13 +20,24 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Warp:
-    """map_xy gives, for each reference pixel, the source pixel to sample."""
+    """map_xy gives, for each reference pixel, the source pixel to sample.
+
+    Two masks for two uses. ``valid`` is where registration error is
+    measured. ``support`` is where the source is sampled for fusion: the
+    pixels at which the source camera sees the same surface point. They
+    differ for the oracle, whose ``valid`` leaves out the depth-edge band:
+    there the correspondence is true but a pixel footprint straddles fore-
+    and background, the mixing a real camera has even when perfectly
+    registered, so it belongs in fusion and not in error statistics.
+    ``support`` defaults to ``valid`` and must contain it.
+    """
 
     ref_band: Band
     src_band: Band
     map_xy: np.ndarray  # (H_ref, W_ref, 2) float
     valid: np.ndarray  # (H_ref, W_ref) bool
     provenance: dict = field(default_factory=dict)
+    support: np.ndarray | None = None  # (H_ref, W_ref) bool; None -> valid
 
     def __post_init__(self) -> None:
         if self.map_xy.ndim != 3 or self.map_xy.shape[2] != 2:
@@ -35,6 +46,12 @@ class Warp:
             raise ValueError(f"valid shape {self.valid.shape} != map_xy shape {self.map_xy.shape[:2]}")
         if self.valid.dtype != bool:
             raise ValueError(f"valid must be bool, got {self.valid.dtype}")
+        if self.support is None:
+            object.__setattr__(self, "support", self.valid)
+        elif self.support.shape != self.valid.shape or self.support.dtype != bool:
+            raise ValueError(f"support must be a bool {self.valid.shape} mask")
+        elif (self.valid & ~self.support).any():
+            raise ValueError("support must contain valid")
 
 
 @dataclass(frozen=True)
@@ -144,6 +161,30 @@ def _oracle_masks(
     return map_xy, masks
 
 
+def _sky_correspondence(ref: DepthView, src: DepthView) -> tuple[np.ndarray, np.ndarray]:
+    """Map and mask of ref misses whose direction the source also sees as a miss.
+
+    A miss (truth_validity 0) is sky at infinite distance: the baseline does
+    not matter there, so its source pixel is the rotation-only reprojection
+    of the ref ray. Kept where all 4 bilinear source neighbours are misses too.
+    """
+    gr, gs = ref.geometry, src.geometry
+    h, w = ref.camera_z.shape
+    hs, ws = src.camera_z.shape
+    rays = BrownConradyCamera(gr).unproject(pixel_grid(gr).reshape(-1, 2), np.ones(h * w))
+    r_ref = np.asarray(gr.world_to_camera, np.float64).reshape(4, 4)[:3, :3]
+    r_src = np.asarray(gs.world_to_camera, np.float64).reshape(4, 4)[:3, :3]
+    map_xy = BrownConradyCamera(gs).project(rays @ (r_src @ r_ref.T).T).reshape(h, w, 2)
+    x, y = map_xy[..., 0], map_xy[..., 1]
+    inside = np.isfinite(map_xy).all(axis=2) & (x >= 0) & (x <= ws - 1) & (y >= 0) & (y <= hs - 1)
+    xf = np.floor(np.nan_to_num(x)).astype(np.int64)
+    yf = np.floor(np.nan_to_num(y)).astype(np.int64)
+    x0, x1 = xf.clip(0, ws - 1), (xf + 1).clip(0, ws - 1)
+    y0, y1 = yf.clip(0, hs - 1), (yf + 1).clip(0, hs - 1)
+    src_sky = np.logical_and.reduce([src.validity[a, b] == 0 for a, b in ((y0, x0), (y0, x1), (y1, x0), (y1, x1))])
+    return map_xy, (ref.validity == 0) & inside & src_sky
+
+
 def oracle_warp(
     ref: DepthView,
     src: DepthView,
@@ -160,14 +201,22 @@ def oracle_warp(
     wherever the point is geometrically projectable (ref validity == 1 and
     src Z > 0), NaN otherwise. valid additionally requires inside bounds, all
     4 bilinear src neighbours valid, the sampled src surface point within
-    pos_rel_tol * camera_z of the ref point, and neither edge band.
+    pos_rel_tol * camera_z of the ref point, and neither edge band. support
+    is valid with the edge bands put back (inside & src_support &
+    correspondence), plus sky both cameras see (ref misses whose source
+    neighbours are misses too, mapped at infinity, where map_xy is finite as
+    well): only occluded and out-of-view pixels and other invalid ref pixels
+    are left out.
     """
     map_xy, masks = _oracle_masks(ref, src, edge_px, edge_rel_tol, pos_rel_tol)
+    sky_xy, sky = _sky_correspondence(ref, src)
+    map_xy[sky] = sky_xy[sky]
     return Warp(
         ref_band=ref_band,
         src_band=src_band,
         map_xy=map_xy,
         valid=masks["valid"],
+        support=(masks["inside"] & masks["src_support"] & masks["correspondence"]) | sky,
         provenance={
             "method": "oracle",
             "edge_px": edge_px,
@@ -204,7 +253,7 @@ def oracle_diagnostics(
 
 
 def apply_warp(src_image: np.ndarray, warp: Warp, interp: str = "linear") -> np.ndarray:
-    """Sample src_image at warp.map_xy (index coords); ~valid or out-of-range -> NaN.
+    """Sample src_image at warp.map_xy (index coords); ~support or out-of-range -> NaN.
 
     interp is "linear" (bilinear, never reads out of bounds) or "nearest".
     float inputs keep their dtype; integer inputs become float32.
@@ -216,7 +265,7 @@ def apply_warp(src_image: np.ndarray, warp: Warp, interp: str = "linear") -> np.
         raise ValueError(f"unknown interp {interp!r}")
     hs, ws = img.shape[:2]
     x, y = warp.map_xy[..., 0], warp.map_xy[..., 1]
-    ok = warp.valid & np.isfinite(x) & np.isfinite(y) & (x >= 0) & (x <= ws - 1) & (y >= 0) & (y <= hs - 1)
+    ok = warp.support & np.isfinite(x) & np.isfinite(y) & (x >= 0) & (x <= ws - 1) & (y >= 0) & (y <= hs - 1)
     dtype = img.dtype if np.issubdtype(img.dtype, np.floating) else np.float32
     out = np.full(warp.map_xy.shape[:2] + img.shape[2:], np.nan, dtype=dtype)
     if not ok.any():

@@ -2,7 +2,8 @@
 
 Both perturbations start from an oracle :class:`Warp` and keep its ``valid``
 mask, so registration error is always measured on the same correspondable
-pixels.  Amplitude 0 returns the oracle ``map_xy`` bit for bit.
+pixels, and its fusion ``support`` (edge band included), so fusion sees the
+same footprint at every amplitude.  Amplitude 0 returns the oracle ``map_xy`` bit for bit.
 
 * inverse-depth bias: every reference pixel is reprojected with
   ``d = 1/z_true + delta_d`` instead of ``1/z_true``, i.e. the point slides
@@ -35,9 +36,13 @@ def inverse_depth_bias_warp(ref: DepthView, src: DepthView, oracle: Warp, delta_
         to_camera(src.geometry, points.reshape(-1, 3))).reshape(h, w, 2)
     map_xy[ref.validity != 1] = np.nan
     map_xy[~(inv > 0)] = np.nan
-    valid = oracle.valid & np.isfinite(map_xy).all(axis=2)
-    return Warp(oracle.ref_band, oracle.src_band, map_xy, valid,
-                {"method": "oracle+inverse_depth_bias", "delta_d": float(delta_d)})
+    # Sky in the oracle support has no depth to bias: it stays at infinity.
+    sky = oracle.support & (ref.validity != 1)
+    map_xy[sky] = oracle.map_xy[sky]
+    finite = np.isfinite(map_xy).all(axis=2)
+    return Warp(oracle.ref_band, oracle.src_band, map_xy, oracle.valid & finite,
+                {"method": "oracle+inverse_depth_bias", "delta_d": float(delta_d)},
+                support=oracle.support & finite)
 
 
 def smooth_field_warp(oracle: Warp, amplitude_px: float, corr_len_px: float, seed: int) -> Warp:
@@ -49,4 +54,5 @@ def smooth_field_warp(oracle: Warp, amplitude_px: float, corr_len_px: float, see
     disp = field * (amplitude_px / rms)
     return Warp(oracle.ref_band, oracle.src_band, oracle.map_xy + disp, oracle.valid.copy(),
                 {"method": "oracle+smooth_field", "amplitude_px": float(amplitude_px),
-                 "corr_len_px": float(corr_len_px), "seed": int(seed)})
+                 "corr_len_px": float(corr_len_px), "seed": int(seed)},
+                support=oracle.support.copy())

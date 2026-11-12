@@ -3,11 +3,13 @@
 import numpy as np
 import pytest
 from dataset_fixture import build_fixture
+from scipy import ndimage
 from test_geometry_oracle import geometry, raycast
 
 from quantiloom_fusion.core.bands import BANDS, Band
 from quantiloom_fusion.evaluation.layer_report import FusedView, combine_layers, layer_masks, source_ref_metrics
-from quantiloom_fusion.geometry import Layer
+from quantiloom_fusion.geometry import Layer, layer_map, oracle_warp
+from quantiloom_fusion.geometry.warp import Warp
 from quantiloom_fusion.evaluation.perturb import smooth_field_warp
 from quantiloom_fusion.evaluation.protocol import (
     PerturbationKind,
@@ -23,7 +25,7 @@ from quantiloom_fusion.dataset import ThreeBandDataset
 from quantiloom_fusion.evaluation.scene import InputSpec, build_scene, load_scene
 from quantiloom_fusion.evaluation.source_ref import ms_ssim_fusion_n, qabf_n, scd_n
 from quantiloom_fusion.evaluation.truth_ref import TruthMode
-from quantiloom_fusion.fusion import Capabilities, FusionMethod, FusionOutput, create
+from quantiloom_fusion.fusion import Capabilities, FusionInput, FusionMethod, FusionOutput, create
 from quantiloom_fusion.signal.normalize import IrLinear, IrTemperature, VisDisplay, VisRawLinear
 
 NORM = {"vis": "vis_display", "ir": "ir_temperature", "params": {"lwir": {"lo": 260.0, "hi": 340.0}},
@@ -67,6 +69,37 @@ def test_zero_amplitude_reproduces_oracle(kind):
     oracle = scene.oracle_warps[Band.LWIR]
     np.testing.assert_array_equal(warps[Band.LWIR].map_xy, oracle.map_xy)
     np.testing.assert_array_equal(warps[Band.LWIR].valid, oracle.valid)
+    np.testing.assert_array_equal(warps[Band.LWIR].support, oracle.support)
+
+
+def test_oracle_fusion_keeps_the_edge_band_and_differs_from_full_masks_only_near_occlusion():
+    # A box in front of a plane: the hot box's outline is the edge band, its
+    # shadow in the source is occluded. A perfectly registered masked pyramid
+    # must not carve the outline out of the IR band.
+    box = (-1.0, 1.0, -1.0, 1.0, 8.0)
+    ref = raycast(geometry(64, 48, 96.0), offset=10.0, box=box)
+    src = raycast(geometry(64, 48, 96.0, t=(0.5, 0.0, 0.0)), offset=10.0, box=box)
+    vis = (0.3 + 0.2 * np.sin(ref.world_position[..., 0] * 7)).astype(np.float32)
+    lwir = np.where(src.world_position[..., 2] < 9.5, 0.9, 0.2).astype(np.float32)
+    oracle = oracle_warp(ref, src, ref_band=Band.VIS, src_band=Band.LWIR)
+    layers = layer_map(ref, src)
+    x, y = oracle.map_xy[..., 0], oracle.map_xy[..., 1]
+    full = np.isfinite(oracle.map_xy).all(axis=2) & (x >= 0) & (x <= 63) & (y >= 0) & (y <= 47)
+
+    def fuse(valid, support):
+        warp = Warp(Band.VIS, Band.LWIR, oracle.map_xy, valid, support=support)
+        x_in = FusionInput(Band.VIS, {Band.VIS: vis, Band.LWIR: lwir},
+                           {Band.VIS: ref.geometry, Band.LWIR: src.geometry}, {Band.LWIR: warp})
+        return create("laplacian_pyramid_masked").fuse(x_in).image
+
+    reference = fuse(full, full)
+    edge = layers == Layer.EDGE
+    far = edge & (ndimage.distance_transform_edt(~np.isin(layers, [Layer.OCCLUDED, Layer.OUT_OF_VIEW])) > 4)
+    assert far.sum() > 100
+    new = np.abs(fuse(oracle.valid, oracle.support) - reference)
+    carved = np.abs(fuse(oracle.valid, oracle.valid) - reference)
+    assert new[edge].mean() < 0.1 * carved[edge].mean()
+    assert new[far].max() < 0.1 < 0.5 < carved[far].max()
 
 
 def test_epe_grows_monotonically_with_inverse_depth_bias():

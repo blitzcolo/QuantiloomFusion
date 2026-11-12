@@ -87,8 +87,10 @@ def evaluate_point(scene: EvalScene, operator: FusionMethod, warps: dict[Band, W
         if not scene.norm.get("scene_independent", True):
             raise ValueError("truth-referenced metrics need a fixed normalisation window: a per-image "
                              "percentile window maps the clean and the noisy image differently")
+        supports = ({b: w.support for b, w in scene.oracle_warps.items()}
+                    if truth_mode == TruthMode.REGISTRATION else None)
         reference, rule = truth_reference(truth_mode, operator,
-                                          clean_input(scene.clean, scene.geometry, scene.reference))
+                                          clean_input(scene.clean, scene.geometry, scene.reference, supports))
     rows = []
     for group, mask in layer_masks(scene.layers).items():
         row = {"operator": operator.name, "truth_mode": truth_mode.value if truth_mode else "",

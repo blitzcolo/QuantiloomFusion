@@ -181,6 +181,33 @@ def test_truth_mode_fusion_scores_a_constant_operator_badly_where_self_reference
     assert fus["truth_rule"] == "laplacian_pyramid_masked" and "cleansrc_SCD" in fus and "cleansrc_SCD" not in reg
 
 
+class Recording(FusionMethod):
+    """Records the source support of every input it fuses."""
+
+    name = "recording"
+    capabilities = Capabilities(frozenset(BANDS), True, False, False, False)
+
+    def __init__(self):
+        self.supports = []
+
+    def fuse(self, x):
+        self.supports.append(x.warps[Band.LWIR].support.copy())
+        return FusionOutput(np.asarray(x.images[x.reference], np.float32))
+
+
+def test_registration_reference_uses_the_oracle_support_and_fusion_reference_full_masks():
+    scene = _scene()
+    oracle = scene.oracle_warps[Band.LWIR]
+    assert not oracle.support.all()  # the tilted plane leaves some of the grid unseen
+    op = Recording()
+    evaluate_point(scene, op, scene.oracle_warps, TruthMode.REGISTRATION)
+    fused_input, reference_input = op.supports
+    np.testing.assert_array_equal(reference_input, oracle.support)
+    op = Recording()
+    evaluate_point(scene, op, scene.oracle_warps, TruthMode.FUSION)
+    assert len(op.supports) == 1  # the FUSION reference is the common baseline rule, not this operator
+
+
 def test_truth_modes_need_clean_images_and_a_fixed_window():
     op = create("max_abs")
     scene = _scene(with_clean=False)

@@ -4,8 +4,11 @@ The co-view references are rendered on the VIS camera's grid, so they need
 no warp.  Two modes that must never be mixed:
 
 * ``REGISTRATION``: compare registration methods with the fusion operator
-  fixed.  Reference = that same operator applied to the clean images; the
-  score is the loss from parallax misregistration and sensor degradation.
+  fixed.  Reference = that same operator applied to the clean images with
+  each source band's support set to the oracle's fusion support: what this
+  camera pair could deliver with perfect registration, so occluded pixels
+  fall back to the reference band there too.  The score is the loss from
+  misregistration and sensor degradation; the oracle is its upper bound.
 * ``FUSION``: compare fusion operators.  Reference = one common baseline rule
   (``laplacian_pyramid_masked`` on full masks, which equals the plain
   ``laplacian_pyramid``) applied to the clean images, identical for every
@@ -43,10 +46,17 @@ def identity_warp(shape: tuple[int, int], ref: Band, src: Band) -> Warp:
 
 
 def clean_input(clean: dict[Band, np.ndarray], geometry: dict[Band, CameraGeometry],
-                reference: Band) -> FusionInput:
-    """Clean co-view images as a fusion input (identity warps: already aligned)."""
+                reference: Band, supports: dict[Band, np.ndarray] | None = None) -> FusionInput:
+    """Clean co-view images as a fusion input (identity warps: already aligned).
+
+    ``supports`` optionally restricts each source band to a mask (the oracle's
+    fusion support for the REGISTRATION reference); default full masks.
+    """
     shape = clean[reference].shape[:2]
     warps = {b: identity_warp(shape, reference, b) for b in clean if b != reference}
+    for b, s in (supports or {}).items():
+        if b in warps:
+            warps[b] = Warp(reference, b, warps[b].map_xy, s.copy(), {"method": "identity", "support": "oracle"})
     return FusionInput(reference=reference, images=dict(clean), geometry=dict(geometry), warps=warps)
 
 

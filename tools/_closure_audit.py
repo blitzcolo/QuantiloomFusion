@@ -192,6 +192,85 @@ def fill_row(net, weather, sun_zen_deg, rel_az_deg, h1_km, view_zen_deg, range_k
     return row
 
 
+# Named presets, as AtmosphereNNConfig.cpp resolves them before explicit keys
+# override: (atmos_model, ihaze, icld, vis_km, rainrt_mm_h, t_ground_K, rh, p_hPa).
+PRESETS = {
+    "clear": (2, 1, 0, 23.0, 0.0, 293.15, 0.50, 1013.25),
+    "turbulent_clear": (2, 1, 0, 20.0, 0.0, 308.15, 0.30, 1010.00),
+    "urban_haze": (2, 5, 0, 8.0, 0.0, 298.15, 0.75, 1010.00),
+    "fog": (2, 9, 0, 0.5, 0.0, 288.15, 1.00, 1015.00),
+    "light_rain": (2, 4, 6, 10.0, 2.5, 290.15, 0.85, 1008.00),
+    "heavy_rain": (2, 4, 6, 2.0, 25.0, 288.15, 0.95, 1005.00),
+    "snow": (3, 1, 6, 2.5, 5.0, 273.15, 0.90, 1020.00),
+    "haze": (2, 5, 0, 3.0, 0.0, 303.15, 0.40, 1000.00),
+}
+WEATHER_KEYS = ("atmos_model", "ihaze", "icld", "vis_km", "rainrt_mm_h", "t_ground_K", "rh", "p_hPa")
+
+
+def resolve_weather(atmos):
+    base = PRESETS.get(atmos.get("preset", "clear"), PRESETS["clear"])
+    w = {k: float(atmos.get(k, v)) for k, v in zip(WEATHER_KEYS, base)}
+    if w["rh"] > 1.0:  # the renderer reads rh > 1 as a percentage
+        w["rh"] /= 100.0
+    w["h2o_scale"] = float(atmos.get("h2o_scale", 1.0))
+    return w
+
+
+def read_nk(path):
+    """(lambda_um, n, k) rows of a refractiveindex.info 'tabulated nk' YAML."""
+    rows = []
+    for line in Path(path).read_text(errors="replace").splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            rows.append([float(v) for v in parts])
+        except ValueError:
+            continue
+    if len(rows) < 2:
+        raise ValueError(f"{path}: no tabulated n,k rows")
+    a = np.asarray(sorted(rows))
+    return a[:, 0], a[:, 1], a[:, 2]
+
+
+def fresnel_unpolarised(cos_i, n, k):
+    """Unpolarised Fresnel reflectance of air -> n + ik at incidence cos_i.
+
+    cos_i: (P,), n, k: (L,) -> (P, L)."""
+    N = (n + 1j * k)[None, :]
+    ci = np.clip(cos_i, 1e-6, 1.0)[:, None]
+    st2 = 1.0 - ci**2
+    ct = np.sqrt(1.0 - st2 / N**2)
+    rs = (ci - N * ct) / (ci + N * ct)
+    rp = (N * ci - ct) / (N * ci + ct)
+    return 0.5 * (np.abs(rs) ** 2 + np.abs(rp) ** 2)
+
+
+def slab_sky(b_air, eps0, cos_zenith):
+    """The renderer's flat-slab sky (AtmosSkyRadianceIR): B(T_air)[1-(1-eps0)^sec]."""
+    sec = np.minimum(1.0 / np.maximum(cos_zenith, 0.01), 5.0)
+    return b_air[None, :] * (1.0 - (1.0 - eps0[None, :]) ** sec[:, None])
+
+
+def invert_many(l_spec, lam_grid, lam_w):
+    """Band-average radiance -> apparent temperature, vectorised bisection."""
+    target = (l_spec * lam_w[None, :]).sum(axis=1)
+    lo = np.full(target.shape, 10.0)
+    hi = np.full(target.shape, 5000.0)
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        with np.errstate(over="ignore"):  # cold bisection bounds: B -> 0 exactly as expm1 -> inf
+            v = (planck_nm(lam_grid[None, :], mid[:, None]) * lam_w[None, :]).sum(axis=1)
+        below = v < target
+        lo = np.where(below, mid, lo)
+        hi = np.where(below, hi, mid)
+    return 0.5 * (lo + hi)
+
+
+def stats(r, m):
+    return f"n={m.sum():5d} bias={r[m].mean():+7.3f} K rms={np.sqrt((r[m] ** 2).mean()):7.3f} K"
+
+
 def main():
     attempt = Path(sys.argv[1])
     cfg = tomllib.loads((attempt / "capture.toml").read_text())
@@ -199,27 +278,19 @@ def main():
         sys.exit("capture.toml has no atmosphere.model_pack")
     models = native_path(cfg["atmosphere"]["model_pack"])
     atmos = cfg["atmosphere"]
-    weather = dict(
-        atmos_model=float(atmos.get("atmos_model", 2.0)),
-        ihaze=float(atmos.get("ihaze", 1.0)), icld=float(atmos.get("icld", 0.0)),
-        vis_km=float(atmos.get("vis_km", 23.0)),
-        rainrt_mm_h=float(atmos.get("rainrt_mm_h", 0.0)),
-        t_ground_K=float(atmos.get("t_ground_K", 293.15)),
-        rh=float(atmos.get("rh", 0.5)), p_hPa=float(atmos.get("p_hPa", 1013.25)),
-        h2o_scale=float(atmos.get("h2o_scale", 1.0)))
+    weather = resolve_weather(atmos)
     sun_dir = np.asarray(cfg["lighting"]["sun_direction"], dtype=float)
+    sun_dir = sun_dir / np.linalg.norm(sun_dir)
     sun_zen = math.degrees(math.acos(np.clip(sun_dir[1], -1.0, 1.0)))
     h1_km = float(atmos.get("h1_km", 0.1))
     w2m = float(cfg["scene"].get("world_units_to_meters", 1.0))
     sun_zen_bake = min(sun_zen, 85.0)
-    night = sun_zen > 85.0
-    scatter_scale = float(atmos.get("solar_scatter_scale", 1.0))
 
-    tapp = read_exr(attempt / "frame_tapp.exr")
-    truth = read_exr(attempt / "frame_truth_surface_temperature.exr")
-    valid = read_exr(attempt / "frame_truth_validity.exr")
-    mat = read_exr(attempt / "frame_truth_material_id.exr")
-    dist = read_exr(attempt / "frame_truth_ray_distance.exr")
+    tapp = read_exr(attempt / "frame_tapp.exr").ravel()
+    truth = read_exr(attempt / "frame_truth_surface_temperature.exr").ravel()
+    valid = read_exr(attempt / "frame_truth_validity.exr").ravel()
+    flat = read_exr(attempt / "frame_truth_material_id.exr").astype(int).ravel()
+    dist = read_exr(attempt / "frame_truth_ray_distance.exr").ravel()
     mats = {m["material_id"]: m for m in
             json.loads((attempt / "frame_truth_materials.json").read_text())}
 
@@ -228,122 +299,147 @@ def main():
 
     nets = {c: Net(models / f"lwir_ground_{c}.safetensors")
             for c in ("tau", "lpath", "ldown")}
-    thermal_band = True  # lwir
 
-    # Evaluate each net once per pixel at its own slant range (the baker's
-    # ground path is horizontal: view zenith 90 deg, path range feature).
-    ranges_km = np.clip(dist.ravel() * w2m / 1000.0, 0.05, 20.0)
+    # Each net once per pixel at its own slant range (the baker's ground path
+    # is horizontal: view zenith 90 deg, path range feature).
+    ranges_km = np.clip(dist * w2m / 1000.0, 0.05, 20.0)
     n_px = ranges_km.size
 
     def infer_at_channels(net, rows):
         out = net.forward(rows)
         return out[:, [net.channel_at(l) for l in lam_grid]]
 
-    tau_rows = np.stack([
-        fill_row(nets["tau"], weather, sun_zen_bake, 0.0, h1_km, 90.0, r)
-        for r in ranges_km])
-    lpath_rows = np.stack([
-        fill_row(nets["lpath"], weather, sun_zen_bake, 0.0, h1_km, 90.0, r)
-        for r in ranges_km])
-    ldown_row = fill_row(nets["ldown"], weather, sun_zen_bake, 0.0, h1_km,
-                         90.0, 1.0)[None, :]
-
-    delta = infer_at_channels(nets["tau"], tau_rows)
-    opaque = (delta.min(axis=1) > nets["tau"].opaque_delta)
-    tau = np.exp(-delta)
-
     def nm_scale(net):
         lam = 1e7 / net.wavenumbers()
         ch = [net.channel_at(l) for l in lam_grid]
         return 1e11 / (lam[ch] ** 2)
 
+    tau_rows = np.stack([fill_row(nets["tau"], weather, sun_zen_bake, 0.0, h1_km, 90.0, r)
+                         for r in ranges_km])
+    lpath_rows = np.stack([fill_row(nets["lpath"], weather, sun_zen_bake, 0.0, h1_km, 90.0, r)
+                           for r in ranges_km])
+    ldown_row = fill_row(nets["ldown"], weather, sun_zen_bake, 0.0, h1_km, 90.0, 1.0)[None, :]
+    delta = infer_at_channels(nets["tau"], tau_rows)
+    opaque = delta.min(axis=1) > nets["tau"].opaque_delta
+    tau = np.exp(-delta)
+    # LWIR lpath is pure thermal emission: never scaled by solar_scatter_scale.
     lp = infer_at_channels(nets["lpath"], lpath_rows) * nm_scale(nets["lpath"])
-    # Single-product lpath in a non-thermal band would be scaled/zeroed for
-    # night or scaled sun; LWIR lpath is pure thermal emission: untouched.
-    _ = night, scatter_scale, thermal_band
-    ld = infer_at_channels(nets["ldown"], ldown_row) * nm_scale(nets["ldown"])
-    ld = np.repeat(ld, n_px, axis=0)
+    ld_zenith = (infer_at_channels(nets["ldown"], ldown_row) * nm_scale(nets["ldown"]))[0]
 
-    eps = np.vectorize(
-        lambda m: mats.get(int(m), {}).get("band_emissivity", 0.9))(mat.ravel())
-    eps = np.clip(eps[:, None], 0.0, 1.0)
-
-    ts = np.clip(truth.ravel(), 1.0, 5000.0)[:, None]
-    bb = planck_nm(lam_grid[None, :], ts)
-
-    l_pred = tau * (eps * bb + (1.0 - eps) * ld) + lp
-    l_pred_bar = (l_pred * lam_w[None, :]).sum(axis=1)
-    # Invert band-average radiance to apparent temperature (bisection).
-    def invert(lb):
-        lo, hi = 10.0, 5000.0
-        for _ in range(60):
-            mid = 0.5 * (lo + hi)
-            v = (planck_nm(lam_grid, mid) * lam_w).sum()
-            if v < lb:
-                lo = mid
-            else:
-                hi = mid
-        return 0.5 * (lo + hi)
-    t_pred = np.array([invert(v) for v in l_pred_bar])
-
-    # Specular variant: for each pixel, replace the isotropic L_down by the
-    # renderer's flat-slab sky model evaluated along the mirror-reflection
-    # direction of the primary ray. The miss shader uses
-    #   L_sky(theta) = B_air * [1 - (1 - eps0)^min(sec theta, 5)],
-    #   eps0 = L_down_zenith / B_air,   B_air = Planck(T_air),
-    # with T_air = lighting.atmosphere_temperature_k and the baked ldown as
-    # the zenith term. Only pixels whose reflection leaves the ground plane
-    # (cos zenith > 0) reflect sky; the rest hit scene geometry and are kept
-    # under the isotropic model.
-    t_air = float(cfg["lighting"].get("atmosphere_temperature_k", 284.68))
+    # With the NN atmosphere active the renderer replaces the thermal-sky air
+    # temperature by atmosphere.t_ground_K (ConfigResolve), whatever
+    # lighting.atmosphere_temperature_k says; the slab law takes its zenith
+    # emissivity from the baked ldown against B(T_air).
+    t_air = weather["t_ground_K"]
     b_air = planck_nm(lam_grid, t_air)
-    eps0 = np.clip(ld[0] / b_air, 0.0, 1.0)
-    try:
-        pos3 = read_exr3(attempt / "frame_truth_world_position.exr",
-                         ("X", "Y", "Z")).reshape(-1, 3)
-        nrm3 = read_exr3(attempt / "frame_truth_geometric_normal.exr",
-                         ("Nx", "Ny", "Nz")).reshape(-1, 3)
-        cam = np.asarray(cfg["camera"]["position"], dtype=float)
-        view = pos3 - cam[None, :]
-        view /= np.linalg.norm(view, axis=1, keepdims=True) + 1e-12
-        nn = nrm3 / (np.linalg.norm(nrm3, axis=1, keepdims=True) + 1e-12)
-        refl = view - 2.0 * (view * nn).sum(axis=1, keepdims=True) * nn
-        rl = np.linalg.norm(refl, axis=1) + 1e-12
-        cos_z = refl[:, 1] / rl                       # world +Y is zenith
-        sec = np.minimum(1.0 / np.maximum(np.abs(cos_z), 0.01), 5.0)
-        l_dir = b_air[None, :] * (
-            1.0 - (1.0 - eps0[None, :]) ** sec[:, None])
-        sky_hit = cos_z > 0.0
-        l_pred_dir = np.where(
-            sky_hit[:, None],
-            tau * (eps * bb + (1.0 - eps) * l_dir) + lp,
-            l_pred)
-        t_pred_dir = np.array([invert(v) for v in
-                               (l_pred_dir * lam_w[None, :]).sum(axis=1)])
-    except FileNotFoundError:
-        t_pred_dir, sky_hit = None, None
+    eps0 = np.clip(ld_zenith / b_air, 0.0, 1.0)
+    # Cosine-weighted hemispherical mean of the slab sky: what an unoccluded
+    # horizontal Lambertian surface reflects.
+    mu = (np.arange(400) + 0.5) / 400.0
+    ld_hemi = 2.0 * (slab_sky(b_air, eps0, mu) * mu[:, None]).mean(axis=0)
 
-    opaque_px = (valid.ravel() == 1) & (truth.ravel() > 0) & (~opaque)
-    print(f"pixels: {n_px}  evaluated (valid && truth>0 && !opaque-path): "
-          f"{opaque_px.sum()}  tau-opaque: {opaque.sum()}")
-    res = t_pred - tapp.ravel()
-    res_dir = (t_pred_dir - tapp.ravel()) if t_pred_dir is not None else res
-    print(f"closure residual tapp_pred - tapp_meas [K]: "
-          f"mean={res[opaque_px].mean():+.3f} rms={np.sqrt((res[opaque_px]**2).mean()):.3f} "
-          f"p5={np.percentile(res[opaque_px],5):+.3f} p95={np.percentile(res[opaque_px],95):+.3f}")
-    for mid in sorted(set(mat.ravel()[opaque_px].astype(int))):
-        m = opaque_px & (mat.ravel() == mid)
-        if m.sum() < 3:
+    # Materials outside the thermal solve export no surface temperature (0);
+    # the renderer emits them at their authored temperature, so use that.
+    authored = np.array([mats.get(m, {}).get("authored_ir_temperature_k") or 0.0 for m in flat])
+    solved = np.array([bool(mats.get(m, {}).get("thermal_participates")) for m in flat])
+    t_surface = np.where((truth <= 0) & ~solved & (authored > 0), authored, truth)
+    with np.errstate(over="ignore"):
+        bb = planck_nm(lam_grid[None, :], np.clip(t_surface, 1.0, 5000.0)[:, None])
+
+    # Specular: the renderer lists n,k-bound surfaces as Fresnel with a null
+    # band emissivity (angle dependent); since 0.10.0 they render a directional
+    # Fresnel lobe in the infrared. Diffuse: measured spectrum or authored
+    # emissivity, one band number.
+    nk_tables = {k: v for k, v in (cfg.get("refractive_index") or {}).items() if isinstance(v, str)}
+    specular_ids = {mid for mid, m in mats.items()
+                    if m.get("emissivity_model") == "fresnel_complex_refractive_index"}
+    diffuse_ids = {mid for mid, m in mats.items()
+                   if mid not in specular_ids and m.get("band_emissivity") is not None}
+    unknown_ids = set(mats) - specular_ids - diffuse_ids
+    base = (valid == 1) & (truth > 0) & (~opaque)
+    print(f"pixels: {n_px}  evaluated (valid && truth>0 && !opaque-path): {base.sum()}  "
+          f"tau-opaque: {opaque.sum()}  T_air = t_ground_K = {t_air:.2f} K")
+    for mid in sorted(specular_ids):
+        if mats[mid]["name"] not in nk_tables:
+            print(f"WARNING: {mats[mid]['name']} is Fresnel in the truth table but capture.toml "
+                  f"has no [refractive_index] entry for it")
+    for name in nk_tables:
+        if not any(mats[mid]["name"] == name for mid in specular_ids):
+            print(f"NOTE: [refractive_index] {name} is not listed as Fresnel in the truth table")
+
+    eps_d = np.array([mats.get(m, {}).get("band_emissivity") or 0.0 for m in flat])
+    eps_d = np.clip(eps_d, 0.0, 1.0)[:, None]
+    diffuse_px = base & np.isin(flat, sorted(diffuse_ids))
+    res_hemi = invert_many(tau * (eps_d * bb + (1.0 - eps_d) * ld_hemi[None, :]) + lp,
+                           lam_grid, lam_w) - tapp
+    res_zen = invert_many(tau * (eps_d * bb + (1.0 - eps_d) * ld_zenith[None, :]) + lp,
+                          lam_grid, lam_w) - tapp
+    if diffuse_px.any():
+        r = res_hemi[diffuse_px]
+        print(f"closure residual tapp_pred - tapp_meas [K]: mean={r.mean():+.3f} "
+              f"rms={np.sqrt((r**2).mean()):.3f} p5={np.percentile(r,5):+.3f} "
+              f"p95={np.percentile(r,95):+.3f} (diffuse materials, isotropic, hemispherical sky)")
+    print("DIFFUSE materials -- tau [eps B(T_s) + (1 - eps) L_down] + L_path with the band "
+          "emissivity of the truth table (one number per material, so emissivity multiplies "
+          "after the band integral: the residual includes that band-average approximation). "
+          "L_down = cosine-weighted hemispherical slab sky | zenith NN ldown for comparison")
+    for mid in sorted(diffuse_ids):
+        m = diffuse_px & (flat == mid)
+        if m.sum() >= 3:
+            print(f"  {mats[mid]['name']:<28} eps={mats[mid]['band_emissivity']:.3f} "
+                  f"{stats(res_hemi, m)} | zenith {stats(res_zen, m)}")
+
+    try:
+        pos3 = read_exr3(attempt / "frame_truth_world_position.exr", ("X", "Y", "Z")).reshape(-1, 3)
+        nrm3 = read_exr3(attempt / "frame_truth_geometric_normal.exr", ("Nx", "Ny", "Nz")).reshape(-1, 3)
+    except FileNotFoundError:
+        print("SPECULAR materials: no world-position/normal truth, not audited")
+        return
+    cam = np.asarray(cfg["camera"]["position"], dtype=float)
+    view = pos3 - cam[None, :]
+    view /= np.linalg.norm(view, axis=1, keepdims=True) + 1e-12
+    nn = nrm3 / (np.linalg.norm(nrm3, axis=1, keepdims=True) + 1e-12)
+    nn[(view * nn).sum(axis=1) > 0.0] *= -1.0  # normals face the camera
+    cos_i = -(view * nn).sum(axis=1)
+    refl = view + 2.0 * cos_i[:, None] * nn
+    refl /= np.linalg.norm(refl, axis=1, keepdims=True) + 1e-12
+    sky_dir = refl[:, 1] > 0.0  # world +Y is the zenith
+    print("SPECULAR materials -- tau [(1 - F) B(T_s) + F L_sky(mirror)] + L_path, F = unpolarised "
+          "Fresnel at the pixel's incidence from the bound n,k; only pixels whose mirror direction "
+          "points at the sky (occlusion of that direction by scene geometry is not tested) | "
+          "isotropic eps = 1 - F(normal) with zenith L_down for comparison")
+    for mid in sorted(specular_ids):
+        name = mats[mid]["name"]
+        m_all = (valid == 1) & (t_surface > 0) & (~opaque) & (flat == mid)
+        if name not in nk_tables or m_all.sum() < 3:
             continue
-        name = mats.get(mid, {}).get("name", "?")
-        line = (f"  {name:<28} n={m.sum():4d}  bias={res[m].mean():+7.3f} K  "
-                f"rms={np.sqrt((res[m]**2).mean()):7.3f} K")
-        if t_pred_dir is not None and (m & sky_hit).sum() >= 3:
-            ms = m & sky_hit
-            line += (f"  | specular-sky n={ms.sum():4d} "
-                     f"bias={res_dir[ms].mean():+7.3f} K  "
-                     f"rms={np.sqrt((res_dir[ms]**2).mean()):7.3f} K")
+        lam_um, n_tab, k_tab = read_nk(native_path(nk_tables[name]))
+        n = np.interp(lam_grid / 1000.0, lam_um, n_tab)
+        k = np.interp(lam_grid / 1000.0, lam_um, k_tab)
+        idx = np.nonzero(m_all & sky_dir)[0]
+        if idx.size < 3:
+            print(f"  {name:<28} n_all={m_all.sum():5d} sky-pointing={idx.size} (too few)")
+            continue
+        F = fresnel_unpolarised(cos_i[idx], n, k)
+        l_spec = tau[idx] * ((1.0 - F) * bb[idx] + F * slab_sky(b_air, eps0, refl[idx, 1])) + lp[idx]
+        r_spec = invert_many(l_spec, lam_grid, lam_w) - tapp[idx]
+        F0 = fresnel_unpolarised(np.ones(1), n, k)[0]
+        l_iso = tau[idx] * ((1.0 - F0)[None, :] * bb[idx] + F0[None, :] * ld_zenith[None, :]) + lp[idx]
+        r_iso = invert_many(l_iso, lam_grid, lam_w) - tapp[idx]
+        every = np.ones(idx.size, bool)
+        interior = cos_i[idx] > 0.5  # away from the limb, where the PSF mixes in the background
+        t_src = "solved" if mats[mid].get("thermal_participates") else f"authored {mats[mid].get('authored_ir_temperature_k')} K"
+        line = (f"  {name:<28} T_s={t_src} n_all={m_all.sum():5d} excluded(mirror below horizon)={m_all.sum() - idx.size:5d} "
+                f"eps(normal)={1.0 - (F0 * lam_w).sum():.3f} | specular {stats(r_spec, every)} "
+                f"| isotropic {stats(r_iso, every)}")
+        if interior.sum() >= 3:
+            line += f" | interior cos_i>0.5: specular {stats(r_spec, interior)}, isotropic {stats(r_iso, interior)}"
         print(line)
+    for mid in sorted(unknown_ids):
+        m = base & (flat == mid)
+        if m.sum() >= 3:
+            print(f"  (not audited) {mats[mid]['name']:<28} n={m.sum():5d} "
+                  f"emissivity_model={mats[mid].get('emissivity_model')}")
 
 
 if __name__ == "__main__":

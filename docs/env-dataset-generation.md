@@ -67,6 +67,8 @@
 
 此前 LWIR 走预设自带的逐像素图样（3 %、2 K、残余 3 %），MWIR 只设了 `enable_fpn`、没有校正——中波的校正信号带着完整的 1 % 响应非均匀（约 0.3 K，是它时域噪声的数倍），长波只留约 0.06 K，三台相机的口径不一致。现在 MWIR 与 LWIR 同为残余 3 %（长波约 0.06 K，中波约 0.01 K）。VIS 不校正：0.5 % 的响应非均匀在满阱以内始终低于散粒噪声（满阱 20000 e⁻ 时散粒噪声 0.7 %），`nuc_residual_fraction = 1.0` 只表示"未校正"。渲染器 0.10.0 修正了光子型 NUC 的语义（`b1f0051`：没有校正图时 `apply_nuc` 留下 r 倍的固定图样，与热型一致；此前是 1 + r 倍）；行列分量是 0.10.0 新增的（`01b8ba1`），种子键不含采集序号，所以和逐像素图样一样在全部视角间保持同一张。数值都是假设值，不是器件标定。
 
+平场实测（2026-11-11，`build/_qa/flatfield-0.10.0`：Quantiloom 的 ε=1、300 K 黑体炉腔，换上本数据集 pilot 的 MWIR/LWIR 传感器段，各渲染两次、`acquisition_index` 不同）：LWIR 原始 DN 的列均值离散为信号的 3.31 %（行均值 21.9 DN 对列 52.0 DN，列为主），校正信号的列离散是原始的 0.030 倍，`tapp` 列均值离散 0.061 K、逐像素 0.095 K（含 NETD 0.05 K）；MWIR 原始列均值离散 0.59 %，`tapp` 列均值离散 0.008 K、逐像素 0.113 K（以时域噪声为主；校正/原始列离散比 0.050，因为时域噪声也进入了列均值）。两次采集的原始列均值相关系数 LWIR 0.999997、MWIR 0.9986——固定图样跨采集保持同一张。
+
 渐晕关闭：渲染器的 `sensor.optics.cos_fourth_vignetting` 缺省为 false，生成器不设置它（0.10.0 起镜头自身发射随视场角的衰减也只在开启渐晕时生效）。三款相机的画幅内辐射响应因此是均匀的，画面边缘的亮度/温度变化全部来自场景。
 
 名义 FOV 指畸变前的垂直视角。脚本由分辨率、像元尺寸和 FOV 计算焦距，并验证导出内参。畸变后的边界视场由原生投影模型决定。
@@ -153,7 +155,7 @@ NN 包在 CPU 烘焙时以太阳天顶角为输入：天顶角 >85° 判定夜�
 
 渲染用的太阳谱是 ASTM G-173（太阳天顶角 48.2°、AM1.5 的地面参考谱，直射+环日列在 280–4000 nm 上的梯形积分 900.14 W/m²），幅度不随场景变化；热求解用的是 Quantiloom-Qt 的 forcing 文件，其直射辐照度随太阳高度变化（`scripts/gen_env_forcing.py`：1158·exp(−浑浊度·大气质量)）。不处理的话，海边场景（16 时、太阳高度 21.1°、forcing 直射 664.4 W/m²）里照亮画面的太阳比加热地表的太阳强三分之一。
 
-`"forcing_direct"`（必填键，无代码默认值；`"none"` 不缩放）让生成器对每个带 `solar_lut` 的条目计算 scale = forcing 文件在场景采集时刻的直射辐照度 ÷ 参考谱直射列（`solar_lut_columns` 的第一项）在原表上的积分，乘进派生太阳谱 CSV 的每一列；采集时刻与 forcing 文件取**源场景 TOML** 的 `[thermal] time_h`/`forcing_file`（低照度臂的覆盖项把 `[thermal]` 换成了 23 时，取的仍是场景构图的那个白天时刻）。低照度臂的 `solar_scale = 2e-6` 乘在这个之上；夜间条目没有太阳表，不涉及。NN 路径辐射的太阳散射缩放（`atmosphere.solar_scatter_scale`）只跟随低照度的 2e-6，不跟随这个幅度对齐。派生 CSV 保留原列名（渲染器靠列名识别地面参考谱并执行晴空规则）。计划的 `scenes[].assumptions` 记录 `solar_scale` 与 `solar_scale_derivation`（两侧直射值、时刻、参考列、对齐比、臂系数）。
+`"forcing_direct"`（必填键，无代码默认值；`"none"` 不缩放）让生成器对每个带 `solar_lut` 的条目计算 scale = forcing 文件在场景采集时刻的直射辐照度 ÷ 参考谱直射列（`solar_lut_columns` 的第一项）在原表上的积分，乘进派生太阳谱 CSV 的每一列；采集时刻与 forcing 文件取**源场景 TOML** 的 `[thermal] time_h`/`forcing_file`（低照度臂的覆盖项把 `[thermal]` 换成了 23 时，取的仍是场景构图的那个白天时刻）。低照度臂的 `solar_scale = 2e-6` 乘在这个之上；夜间条目的太阳表只为让渲染器推导短波吸收率而保留，`solar_scale = 1e-12` 同样乘在这个之上（见"夜间臂"）。NN 路径辐射的太阳散射缩放（`atmosphere.solar_scatter_scale`）只跟随低照度的 2e-6，不跟随这个幅度对齐。派生 CSV 保留原列名（渲染器靠列名识别地面参考谱并执行晴空规则）。计划的 `scenes[].assumptions` 记录 `solar_scale` 与 `solar_scale_derivation`（两侧直射值、时刻、参考列、对齐比、臂系数）。
 
 正式配置实测（`build/_parity/20261111-c3-formal`）：
 
@@ -270,7 +272,11 @@ python tools/generate_env_dataset.py verify `
 
 不加 `--inspect-exr` 时，仍检查文件哈希、输出完整性和实际相机参数；加上后进一步检查 EXR 尺寸、通道、有限像素及内嵌事务标识。`verify` 只对目录中已存在的样本做一致性校验：**没有渲染的计划目录也能通过验证**（输出 `complete=0`）。判断数据集是否完成须看输出的 `complete` 是否等于 `planned`，或以 `dataset.index.json` 为准。
 
-辐射自检另有独立工具 `tools/_closure_audit.py <attempt_dir>`（配套：`tools/_mask_audit.py` 按 validity×材质分桶统计 `tapp` 与真值，定位偏差归属材质；`tools/_spectral_integration_audit.py` 以全通道精确积分定标采样网格残差）：离线复算同一 NN 模型包的大气推理（numpy 复刻 AtmosNet/ResMLP 前向），按 `L_pred = τ·[εB(T_s)+(1−ε)L_down]+L_path` 逐像素对照 corrected 信号（经 tapp 反演口径），按材质报告偏差——渲染端与导出端的大气不一致会以系统性偏差暴露（0.7.2 的 LWIR 采样缺陷即由此类检查定位）。低发射率材质用**镜面路径变体**：沿法线-视线反射方向代入着色器同款角向天空模型 `L_down(θ)=B_air·[1−(1−ε0)^sec θ]`，检验"冷镜面反射暖天空"这条 LWIR 物理链的其余部分（掠射角发射率、遮挡修正之外的项）。CLI 不导出波段积分 τ/lpath/ldown，该脚本是闭合检验的替代路径；依赖 `numpy`/`OpenEXR`/`safetensors`。正式运行中 `dataset.closure_audit_every = 50` 让生成器每完成 50 个三元组自动在最新 LWIR attempt 上跑一次并归档 `closure_audit.txt` 到该样本目录，中途回归不必等到全部渲完才暴露。
+辐射自检另有独立工具 `tools/_closure_audit.py <attempt_dir>`（配套：`tools/_mask_audit.py` 按 validity×材质分桶统计 `tapp` 与真值，定位偏差归属材质；`tools/_spectral_integration_audit.py` 以全通道精确积分定标采样网格残差）：离线复算同一 NN 模型包的大气推理（numpy 复刻 AtmosNet/ResMLP 前向），按 `L_pred = τ·[εB(T_s)+(1−ε)L_down]+L_path` 逐像素对照 corrected 信号（经 tapp 反演口径），按材质报告偏差——渲染端与导出端的大气不一致会以系统性偏差暴露（0.7.2 的 LWIR 采样缺陷即由此类检查定位）。低发射率材质用**镜面路径变体**：沿法线-视线反射方向代入着色器同款角向天空模型 `L_down(θ)=B_air·[1−(1−ε0)^sec θ]`，检验"冷镜面反射暖天空"这条 LWIR 物理链的其余部分（掠射角发射率、遮挡修正之外的项）。CLI 不导出波段积分 τ/lpath/ldown，该脚本是闭合检验的替代路径；依赖 `numpy`/`OpenEXR`/`safetensors`。
+
+**2026-11-11 起审计按材质分两类**（渲染器 0.10.0 之后，有光学常数的光滑表面在红外按方向菲涅耳镜面瓣渲染）：漫射材质（绑定实测谱或只有标量发射率）用各向同性式 τ·[εB(T_s)+(1−ε)L_down]+L_path，L_down 取渲染器平板天空律 B(T_air)·[1−(1−ε₀)^secθ] 的余弦加权半球平均（同时给出天顶 NN ldown 的对照列）；真值清单里每个材质只有一个波段等效发射率（`band_emissivity` = 1 − 波段内反射率的不加权平均 − τ），所以发射率是在波段积分之后才乘上的，残差里包含这个带平均近似。镜面材质（真值清单 `emissivity_model = "fresnel_complex_refractive_index"`，0.10.0 对它们导出的 `band_emissivity` 是 null——渲染器的注释原话是"角度相关，一个数会是谎言"；与 capture.toml 的 `[refractive_index]` 交叉核对，本数据集是铬球 Cr 与裸铝 `Car_M_IRON.004`，玻璃在中长波没有 n,k、按 0.84 的漫射面处理）逐像素由法线真值求镜面方向，**只取镜面方向指向天空的像素**（镜面方向的遮挡没有检验），反射率取该入射角下由 n,k 表计算的非偏振菲涅耳 F(θ, λ)，发射率 1 − F，入射辐亮度取镜面方向的平板天空；镜面方向落到地面或物体上的像素不纳入。两点口径修正：NN 大气激活时渲染器把热天空的 T_air 换成 `atmosphere.t_ground_K`（旧审计误用 `lighting.atmosphere_temperature_k`，夜间 284.68 K 对 300 K）；大气预设先按渲染器的预设表取值再被显式键覆盖。不参与热求解的材质（铬球、铝件）没有表面温度真值（导出 0），按真值清单里的 `authored_ir_temperature_k` 取。
+
+实测（`build/env-pilot-0.10.0` 全部 24 个 LWIR 采集，中位数）：铬球镜面方向朝天的像素，各向同性式偏差 −20.9 K（rms 24.0 K，夜间与低照度）、−24.7 K（rms 28.6 K，白天）；方向菲涅耳式 +0.45 K（rms 3.4 K）、−3.4 K（rms 5.4 K）；离开球缘的内部像素（cos θᵢ > 0.5）几乎一样，所以剩余离散主要不是 PSF 在球缘混入背景。偏差降到 1 K 以内，rms 没有：剩余部分来自镜面瓣的有限宽度（铬球粗糙度 0.12，近地平线处平板天空随天顶角变化很陡）、带平均近似，以及镜面方向上可能被房屋等遮挡（未检验）。漫射面夜间/低照度混凝土地面 rms 0.43 K、白墙 0.20 K、车身 0.86 K；白天混凝土 rms 3.3 K（中位偏差 −1.3 K），离散集中在强温度梯度处——预测用逐像素真值温度，而相机 `tapp` 经过 1.1 px PSF 模糊。正式运行中 `dataset.closure_audit_every = 50` 让生成器每完成 50 个三元组自动在最新 LWIR attempt 上跑一次并归档 `closure_audit.txt` 到该样本目录，中途回归不必等到全部渲完才暴露。
 
 ## 断点恢复和复现
 
@@ -303,6 +309,8 @@ jobs|state|attempts|samples/<sample>/ref_<band>...   共视点无噪声参考（
 融合质量缺一个真正的参考图像；合成数据能给出实拍给不了的东西。配置里的 `[reference_subset]`（`azimuths_deg`、`elevations_deg`、`radius_scales`，取值必须出现在 `[sampling]` 里；不写这个表则计划与任务文件逐字节不变）选出一部分样本，每个追加三次渲染 `ref_vis`、`ref_mwir`、`ref_lwir`：**几何全部取可见光相机**（位姿、分辨率、名义 FOV、畸变、偏置/旋转，光学模糊统一取可见光的 `psf_sigma_px = 0.45`），探测器类型、光谱响应与光谱模式、像元尺寸、F 数、曝光与读出取各自波段的相机（毫米焦距随像元尺寸变，像素内参与可见光相同；低照度臂的 1 s VIS 曝光同样作用于 `ref_vis`），`sensor.quality.noise_free = true`。场景各段（温度场/热求解、大气、材质、太阳表）与该样本对应波段的正式任务完全相同，只有 `[camera]`、`[renderer]` 的分辨率与种子、`[sensor]` 以及 `[dataset].acquisition_index`（按 `ref_<band>` 取键）不同；同一配方、同一指纹体系。三幅参考与可见光的无噪声图像严格共视点、逐像素对齐，没有视差，也没有传感器噪声。
 
 正式配置取方位 0°/90°/180°/270°、俯仰 12°、距离系数 1.0：12 个条目 × 4 个视角 = 48 个参考样本、144 次渲染（`plan` 打印 `(+144 reference renders)`）；pilot 12 个、smoke 6 个（全部样本）。参考在该样本三个正式波段之后渲染，与相机采集一样计入 `--max-captures`、走同一套 attempt/receipt/发布/恢复（`state|attempts|samples/<id>/ref_<band>`）；样本是否完整仍只看三个正式波段，参考是独立的一组产品。发布：`sample.json` 升为 v2，`references` 在三幅都发布后才非空，结构与 `observations` 相同；`dataset.index.json` 每条带 `references` 布尔值；`verify` 打印 `references=<已发布>/<计划>`。消费端只经契约读取（`Sample.references`、`ThreeBandDataset.references(sample_id)`），不按文件名找。
+
+实测（Quantiloom 0.10.0，`build/env-pilot-0.10.0`，12 个参考样本 × 3 = 36 幅）：用真值世界坐标经可见光相机模型把每幅参考投回自身，最大偏差 0.0010 px（float32 精度），三幅参考的世界坐标真值与可见光正式采集逐像素相同（差 0.0 m）。真实 MWIR/LWIR 相机的 `tapp` 经 oracle 对应重采样到可见光网格后与共视点参考 `tapp` 相减（只取可对应区，每个工况 4 个样本，像素数 MWIR 294728、LWIR 373358）：夜间与低照度 LWIR rms 0.173 K、MWIR 0.103 K，白天 LWIR 0.794 K、MWIR 0.609 K，中位数都在 ±0.01 K 以内，P95 绝对值 0.18–0.71 K——差异来自分辨率（真实相机像素更粗、重采样插值）、模糊（PSF 0.8/1.1 px 对参考的 0.45 px）与噪声（NETD 与残余固定图样），白天对比度高、前两项更大。耗时：参考一组中位 17.5 s，正式配置 144 次渲染约 14 分钟（`render.log` 时间戳）。
 
 融合端从 `dataset.index.json` 遍历完整样本，再读取 `sample.json` 中 `observations.vis`、`observations.mwir`、`observations.lwir`。产品路径相对于数据集根目录，原生导出元数据的产品路径相对于它所在的目录。分发时保留 `dataset.plan.json`、`dataset.index.json`、`state` 和 `samples` 即可使用完整的独立验证命令；融合读取只需索引、样本清单及清单指向的产品与元数据。`jobs`、`attempts` 和原始资产用于生成端复现，不是融合端依赖。
 

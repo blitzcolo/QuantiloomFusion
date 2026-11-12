@@ -28,7 +28,7 @@ from ..fusion.registry import available as fusion_available
 
 VIS_INPUTS = ("display", "raw_adc", "raw_percentile")
 IR_INPUTS = ("linear", "temperature")
-REGISTRATIONS = ("oracle", "infinity_homography", "resize")
+REGISTRATIONS = ("oracle", "infinity_homography", "resize", "epipolar_sweep", "free_search")
 OUTPUTS = ("grey", "colour")
 METRIC_NAMES = ("EN", "SD", "SF", "AG", "SCD", "Qabf", "MS_SSIM")
 

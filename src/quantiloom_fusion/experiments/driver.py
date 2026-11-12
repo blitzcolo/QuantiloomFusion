@@ -41,6 +41,8 @@ from ..fusion.base import FusionInput, FusionOutput
 from ..fusion.registry import create
 from ..geometry.warp import apply_warp
 from ..registration import (
+    EpipolarSweepRegistrar,
+    FreeSearchRegistrar,
     InfinityHomographyRegistrar,
     OracleRegistrar,
     ResizeRegistrar,
@@ -86,6 +88,10 @@ def _registrar(name: str, dataset: ThreeBandDataset):
         return ResizeRegistrar()
     if name == "infinity_homography":
         return InfinityHomographyRegistrar()
+    if name == "epipolar_sweep":
+        return EpipolarSweepRegistrar()
+    if name == "free_search":
+        return FreeSearchRegistrar(step_px="sweep")
     raise ValueError(f"unknown registrar {name!r}")
 
 
@@ -144,10 +150,13 @@ class _SampleWork:
         if key not in self.warps:
             if registration not in self.registrars:
                 self.registrars[registration] = _registrar(registration, self.dataset)
-            # None, None: the registered registrars do not read the images.
+            # The calibrated registrars ignore the images; the sweeps read
+            # them, on the inputs their gates were tuned on.
+            images = ((self.grey_input(self.reference, "raw_percentile"), self.grey_input(band, "linear"))
+                      if registration in ("epipolar_sweep", "free_search") else (None, None))
             self.warps[key] = self.registrars[registration].estimate(
                 self.sample.observations[self.reference],
-                self.sample.observations[band], None, None)
+                self.sample.observations[band], *images)
         return self.warps[key]
 
 

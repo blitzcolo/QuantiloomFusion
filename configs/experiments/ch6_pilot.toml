@@ -1,0 +1,24 @@
+name = "ch6-pilot-0.10.0"
+dataset = "build/env-pilot-0.10.0"
+bands = ["vis", "mwir", "lwir"]
+vis_input = "raw_adc"
+ir_input = "temperature"
+items = ["matrix", "sensitivity", "registration_study", "complementarity"]
+registration = ["oracle", "epipolar_sweep", "infinity_homography", "resize"]
+operators = ["laplacian_pyramid_masked", "noise_aware_pyramid"]
+levels = 4
+kappa = 2.5
+fpn = true
+similarity = "grad_ncc"
+z_min_m = 3.0
+
+[sensitivity]
+bias = [0.0, 0.002, 0.005, 0.01, 0.02, 0.05]
+field = [0.0, 0.5, 1.0, 2.0, 4.0]
+corr_len_px = 8.0
+seed = 0
+inflation = true
+
+[registration_study]
+similarities = ["grad_ncc"]
+free_steps = ["sweep", 1.0]

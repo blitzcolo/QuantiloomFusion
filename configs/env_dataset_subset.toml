@@ -18,6 +18,11 @@ solar_ir_policy = "planck_tail"
 # forcing file's direct beam at the scene's hour, so the sun that lights
 # the frame is the sun that heated the ground. Derived by the generator.
 daylight_solar_scale = "forcing_direct"
+# Air temperature and humidity of every entry's [atmosphere] (t_ground_K,
+# air_temperature_k, rh) come from the forcing row at its [thermal] time_h,
+# so the sky and path radiance belong to the air the thermal solve used.
+# Derived by the generator; do not restate them in the overrides.
+atmosphere_air = "forcing_row"
 # constant: strip spectral bindings in IR, authored emissivity only.
 # spectral: merged library bindings render measured spectra in every band.
 ir_materials = "spectral"
@@ -64,8 +69,8 @@ config = "env_seaside.toml"
 # VIS-failure arm: the same four scenes at 23:00 under the same rig. Overrides
 # replace whole named sections, so each night variant restates [lighting]
 # (sun and solar_lut removed, sky zeroed), [thermal] (same forcing file,
-# solved to hour 23) and [atmosphere] (same NN preset, ground temperature and
-# humidity taken from the forcing row at 23:00, not kept at day values).
+# solved to hour 23) and [atmosphere] (same NN preset; air temperature and humidity are derived
+# from the forcing row at 23:00 by atmosphere_air, not kept at day values).
 # atmosphere_temperature_k follows the forcing sky_temperature_k; the sun
 # direction is the real below-horizon solar position at 23:00.
 # The night arm keeps the scene's solar table, scaled to 1e-12, only so the
@@ -109,10 +114,6 @@ ihaze = 1
 icld = 0
 vis_km = 23
 rainrt_mm_h = 0
-t_ground_K = 300.0
-air_temperature_k = 300.0
-rh = 0.48
-relative_humidity = 48
 p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"
@@ -152,10 +153,6 @@ ihaze = 1
 icld = 0
 vis_km = 20
 rainrt_mm_h = 0
-t_ground_K = 296.75
-air_temperature_k = 296.75
-rh = 0.19
-relative_humidity = 19
 p_hPa = 1010
 h2o_scale = 1
 sky_model = "isotropic"
@@ -190,9 +187,6 @@ forcing_file = "../forcing/grassland_day.csv"
 [scenes.overrides.atmosphere]
 preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
-t_ground_K = 288.25
-air_temperature_k = 288.25
-rh = 0.655
 
 [[scenes]]
 id = "seaside_night"
@@ -229,10 +223,6 @@ ihaze = 1
 icld = 0
 vis_km = 30
 rainrt_mm_h = 0
-t_ground_K = 294.0
-air_temperature_k = 294.0
-rh = 0.80
-relative_humidity = 80
 p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"
@@ -286,10 +276,6 @@ ihaze = 1
 icld = 0
 vis_km = 23
 rainrt_mm_h = 0
-t_ground_K = 300.0
-air_temperature_k = 300.0
-rh = 0.48
-relative_humidity = 48
 p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"
@@ -330,10 +316,6 @@ ihaze = 1
 icld = 0
 vis_km = 20
 rainrt_mm_h = 0
-t_ground_K = 296.75
-air_temperature_k = 296.75
-rh = 0.19
-relative_humidity = 19
 p_hPa = 1010
 h2o_scale = 1
 sky_model = "isotropic"
@@ -369,9 +351,6 @@ forcing_file = "../forcing/grassland_day.csv"
 [scenes.overrides.atmosphere]
 preset = "clear"
 model_pack = "H:/Quantiloom-dev/assets/atmos_models"
-t_ground_K = 288.25
-air_temperature_k = 288.25
-rh = 0.655
 
 [[scenes]]
 id = "seaside_moonlight"
@@ -409,10 +388,6 @@ ihaze = 1
 icld = 0
 vis_km = 30
 rainrt_mm_h = 0
-t_ground_K = 294.0
-air_temperature_k = 294.0
-rh = 0.80
-relative_humidity = 80
 p_hPa = 1013.25
 h2o_scale = 1
 sky_model = "isotropic"

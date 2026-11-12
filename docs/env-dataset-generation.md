@@ -125,9 +125,30 @@ NMF RMSE 的物理量级换算：典型 ~0.006 的反射率误差按 ε=1−ρ �
 
 ### 大气：`atmosphere_mode = "source"`
 
-保留场景绑定的大气配置，并新增数据集级 `atmosphere_model_pack` 键把**四个场景统一到同一 NN 模型包**（`H:/Quantiloom-dev/assets/atmos_models`）——大气模型是配方变量，不允许逐场景解析到不同实现；场景之间只保留预设参数差异（concrete、grassland、seaside 为 `clear`，desert 为 `turbulent_clear` 且 `vis_km = 20`，及各自的 `t_ground_K`、湿度）。同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的地表/气温、湿度与天空温度随时刻不同——三种工况之间的比较因此是照度的单变量对照，夜间地表温度所依据的热历史（晴空直射的白天）与成像大气自洽。渲染器 0.10.0 另有一条硬规则（`ConfigResolve.cpp` 的 `ReferenceSunAtmosphereConflict`）：太阳在地平线以上且 `solar_lut` 是地面参考谱（列名含 ETR/extraterrestrial，ASTM G-173 即是）时，大气必须是晴空（`vis_km ≥ 20`、`ihaze = 1`、无云无雨），否则直接报错。生成器派生的太阳谱 CSV 保留原列名，所以低照度臂（太阳仰角 5°）同样受这条规则约束——此前 concrete 夜间/低照度臂沿用的 8 km 城市霾（ihaze 5）与 desert 的 18 km 在 0.10.0 下都会被拒绝。按 `{lwir,mwir,nir,swir,vis} × {ground,slant,sky} × {tau,lpath,ldown}` 组织：路径透射、路径辐射与**天空下行辐射**都由网络给出，LWIR 中 L = εB(T) + (1−ε)L_down 的下行项因此是有模型的，不是常数背景。
+保留场景绑定的大气配置，并新增数据集级 `atmosphere_model_pack` 键把**四个场景统一到同一 NN 模型包**（`H:/Quantiloom-dev/assets/atmos_models`）——大气模型是配方变量，不允许逐场景解析到不同实现；场景之间只保留预设参数差异（concrete、grassland、seaside 为 `clear`，desert 为 `turbulent_clear` 且 `vis_km = 20`，气温与湿度由生成器按各条目时刻从 forcing 推导，见下）。同一场景的白天、夜间、低照度三个条目共用同一个大气预设（气溶胶类型与能见度），只有 23:00 forcing 行给出的地表/气温、湿度与天空温度随时刻不同——三种工况之间的比较因此是照度的单变量对照，夜间地表温度所依据的热历史（晴空直射的白天）与成像大气自洽。渲染器 0.10.0 另有一条硬规则（`ConfigResolve.cpp` 的 `ReferenceSunAtmosphereConflict`）：太阳在地平线以上且 `solar_lut` 是地面参考谱（列名含 ETR/extraterrestrial，ASTM G-173 即是）时，大气必须是晴空（`vis_km ≥ 20`、`ihaze = 1`、无云无雨），否则直接报错。生成器派生的太阳谱 CSV 保留原列名，所以低照度臂（太阳仰角 5°）同样受这条规则约束——此前 concrete 夜间/低照度臂沿用的 8 km 城市霾（ihaze 5）与 desert 的 18 km 在 0.10.0 下都会被拒绝。按 `{lwir,mwir,nir,swir,vis} × {ground,slant,sky} × {tau,lpath,ldown}` 组织：路径透射、路径辐射与**天空下行辐射**都由网络给出，LWIR 中 L = εB(T) + (1−ε)L_down 的下行项因此是有模型的，不是常数背景。
 
 **湿度只写一个键**：Quantiloom 0.8 把 `atmosphere.rh`（分数，NN 输入）与 `atmosphere.relative_humidity`（百分数）解析为同一个湿度，两者都给且不一致时告警，并用 `rh` 同时驱动 NN 与热平衡。Qt 白天场景两键并存且不一致（concrete 0.75 对 50 %、desert 0.15 对 50 %、seaside 0.70 对 50 %），生成器在两键并存时只保留 `rh`，任务 TOML 写的就是渲染器实际使用的湿度。数值不变：NN 自 0.7.4 起就读 `rh`，热求解逐行读 forcing CSV 的湿度列（四份 `*_day.csv` 都是含湿度的 8 列格式）。
+
+**气温与湿度从 forcing 推导（`atmosphere_air = "forcing_row"`，2026-11-12 起）**：渲染器在 NN 大气启用时把 `atmosphere.t_ground_K` 当作气温（NN 烘焙输入，热天空的 T_air 也被它替换），湿度取 `rh`；热求解却逐行读 forcing CSV 的气温、天空温度与湿度。此前只有夜间/低照度条目在覆盖段里手填 23:00 的值，白天条目沿用 Qt 场景文件的名义值（concrete 303.15 K / 预设 0.50、desert 318.15 K / 0.15、grassland 293.15 K / 0.50、seaside 295.15 K / 0.70），加热地表的空气与成像视线上的空气不是同一团。现在生成器对每个带 `[atmosphere]` 的条目从它的 `[thermal] forcing_file` 在 `time_h` 处读出气温与湿度（按渲染器加载器的列序，行间线性插值），写入 `t_ground_K`、`air_temperature_k`（只有 `sky_model = "clear_sky"` 时读）与 `rh`（分数；`relative_humidity` 不再写，见上），并把来源行号、取值记入计划的 `scenes[].assumptions.atmosphere_air`。覆盖段再手写这几个键会被拒绝（一个数只有一个来源）；预设（气溶胶类型、能见度）照旧。`lighting.atmosphere_temperature_k` 不推导：0.10.0 在 NN 大气启用时用 `t_ground_K` 覆盖它（`ConfigResolve.cpp` "An active atmosphere owns the thermal-sky temperature"），热求解有 forcing 时用 forcing 的天空温度，它只是两者都缺席时的回退，夜间覆盖段里的值保留不动。
+
+白天条目因此变为 concrete 308.80 K / 30.4 %（第 41 行，14 h）、desert 312.25 K / 11.0 %（第 38 行，11 h）、grassland 293.18 K / 54.1 %（第 37 行，10 h）、seaside 299.86 K / 68.3 %（第 43 行，16 h）。回归检查：改动前后对正式、subset、pilot、smoke 四份配置各做一次 `plan`，逐个任务 TOML 比较，夜间与低照度条目的全部任务数值相同（只有派生太阳 CSV 的输出目录路径不同），白天条目只变了这三个键。
+
+改动前后对照（2026-11-12，Quantiloom 0.10.0，四个白天场景 × 方位 0°/45°、俯仰 12°、距离 1.0 的 LWIR，同一批种子；`build/_qa/atmos-forcing-before` 由改动前的 HEAD 生成、`build/_qa/atmos-forcing-after` 由改动后生成；两边 `truth_surface_temperature` 逐像素相同，所以差异全来自成像大气）：
+
+| 场景 | 表面 | 像素（两个视角） | 改动前 `tapp` 中位 | 改动后 | 逐像素差中位 |
+|---|---|---|---|---|---|
+| concrete（+5.65 K，RH 50→30.4 %） | 混凝土地面 | 58224 | 321.40 K | 321.44 K | +0.03 K |
+| | 铬球（镜面方向朝天） | 498 | 281.41 K | 281.54 K | +0.02 K |
+| desert（−5.90 K，RH 15→11 %） | 沙地 | 58842 | 327.48 K | 327.35 K | −0.12 K |
+| | 铬球（镜面方向朝天） | 351 | 285.53 K | 280.27 K | −4.82 K |
+| grassland（+0.03 K，RH 50→54.1 %） | 草地 | 57677 | 300.39 K | 300.40 K | +0.00 K |
+| | 铬球（镜面方向朝天） | 343 | 273.18 K | 273.67 K | +0.46 K |
+| seaside（+4.71 K，RH 70→68.3 %） | 海面（全部） | 33385 | 298.73 K | 299.74 K | +1.07 K |
+| | 海面（镜面方向天顶角 > 75°，掠射） | 17153 | 297.77 K | 299.36 K | +1.60 K |
+| | 沙滩 | 19613 | 303.53/304.52 K | 303.72/304.72 K | +0.18/+0.21 K（两个视角） |
+| | 铬球（镜面方向朝天，仅 45° 视角可见） | 50 | 273.83 K | 278.38 K | +4.13 K |
+
+高发射率漫射面变化在 0.2 K 以内；反射天空的表面直接跟着天空走：掠射海面 +1.6 K，铬球 −4.8…+4.1 K。concrete 气温升高 5.65 K 而铬球几乎不变，是因为湿度同时从预设的 0.50 降到 0.304，天空发射率下降抵消了升温（推断：只由这一组对照得出，没有单独改一个量）。
 
 与渲染的太阳项的组成关系：`L_pixel(λ) = τ_view(λ) × L_surface(λ) + L_path(λ)`——表面照明（太阳直射 + 天空漫射）完全走 `solar_lut` 绑定表，NN 只提供视线透射、路径辐射和热下行。因此 ASTM G173 地表谱**不会被 NN 二次衰减**；代价是 LUT 的直射/漫射配比与 NN 大气状态不严格自洽，属已声明的近似。
 

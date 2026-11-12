@@ -314,6 +314,38 @@ class PlanningContracts(unittest.TestCase):
         self.out=self.root/'dataset2'
         with self.assertRaisesRegex(ValueError,'forcing_file and time_h'):self.plan()
 
+    def test_atmosphere_air_follows_the_forcing_row_of_each_entry(self):
+        # Rows at 10 h and 14 h (lines 3 and 4); the day entry at 12 h
+        # interpolates them, the night entry at 14 h falls on line 4.
+        (self.root/'day.csv').write_text('# preamble\n#time_h,air,sun,az,el,sky,diffuse,rh\n'
+                                         '10.0,290,500.0,0,30,270,50,40\n14.0,300,900.0,0,50,280,60,30\n')
+        doc=tomllib.loads(self.scene.read_text())
+        doc['thermal']={'enabled':True,'time_h':12.0,'forcing_file':'day.csv'}
+        doc['atmosphere']={'preset':'clear','vis_km':30.0,'rh':0.7,'t_ground_K':295.15,'model_pack':self.root.as_posix()}
+        self.scene.write_text(tomlio.toml_text(doc))
+        self.settings['dataset'].update(atmosphere_air='forcing_row',atmosphere_model_pack=self.root.as_posix())
+        night={'thermal':{'enabled':True,'time_h':14.0,'forcing_file':'day.csv'},'atmosphere':{'preset':'clear','vis_km':23,'model_pack':self.root.as_posix()}}
+        self.settings['scenes']=[{'id':'test','config':self.scene.as_posix()},
+                                 {'id':'test_night','config':self.scene.as_posix(),'overrides':night}]
+        self.save();p=self.plan()
+        jobs={s['scene_id']:tomllib.loads((self.out/s['cameras']['lwir']['job']).read_text())['atmosphere'] for s in p['samples']}
+        self.assertEqual({k:jobs['test'][k] for k in ('t_ground_K','air_temperature_k','rh','vis_km','preset')},
+                         {'t_ground_K':295.0,'air_temperature_k':295.0,'rh':0.35,'vis_km':30.0,'preset':'clear'})
+        self.assertEqual({k:jobs['test_night'][k] for k in ('t_ground_K','air_temperature_k','rh','vis_km')},
+                         {'t_ground_K':300.0,'air_temperature_k':300.0,'rh':0.3,'vis_km':23})
+        info={s['id']:s['assumptions']['atmosphere_air'] for s in p['scenes']}
+        self.assertEqual((info['test']['source_lines'],info['test_night']['source_lines']),([3,4],[4]))
+        self.assertEqual(info['test_night']['relative_humidity_pct'],30.0)
+        # The recorded override stays as the settings wrote it.
+        self.assertNotIn('t_ground_K',p['scenes'][1]['overrides']['atmosphere'])
+        # Hand-stated air in an override would be a second source of truth.
+        night['atmosphere']['t_ground_K']=300.0;self.save();self.out=self.root/'dataset2'
+        with self.assertRaisesRegex(ValueError,'by hand'):self.plan()
+        del night['atmosphere']['t_ground_K']
+        (self.root/'day.csv').write_text('10.0,290,500.0,0,30,270\n14.0,300,900.0,0,50,280\n')
+        self.save();self.out=self.root/'dataset3'
+        with self.assertRaisesRegex(ValueError,'relative_humidity column'):self.plan()
+
     def test_fixed_pattern_and_nuc_reach_the_job_and_are_validated(self):
         p=self.plan();cams=p['samples'][0]['cameras']
         job={b:tomllib.loads((self.out/cams[b]['job']).read_text())['sensor'] for b in constants.BANDS}

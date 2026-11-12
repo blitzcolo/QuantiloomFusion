@@ -1,4 +1,4 @@
-"""Solar spectrum derivation: Planck-tail extension, forcing-matched and low-light scaling."""
+"""Forcing-file reads and solar spectrum derivation: Planck-tail extension, forcing-matched and low-light scaling."""
 
 import csv
 import io
@@ -39,6 +39,37 @@ def forcing_direct(path, time_h):
         if t0<=time_h<=t1:
             return e0 if t1==t0 else e0+(e1-e0)*(time_h-t0)/(t1-t0)
     if rows and rows[-1][0]==time_h:return rows[-1][1]
+    raise ValueError(f'{path}: time_h {time_h} outside the forcing rows')
+
+
+# Column order of a thermal forcing CSV as the renderer's loader reads it;
+# the last two columns are optional.
+FORCING_COLUMNS=('time_h','air_temperature_k','sun_irradiance_w_m2','sun_azimuth_deg','sun_elevation_deg',
+                 'sky_temperature_k','diffuse_irradiance_w_m2','relative_humidity')
+
+
+def forcing_row(path, time_h):
+    """Every column of a thermal forcing CSV at time_h, interpolated linearly.
+
+    Returns {column: value} for the columns both bracketing rows have, plus
+    'source_lines': the 1-based line numbers of those rows (one number when
+    time_h falls on a row)."""
+    rows=[]
+    for i,line in enumerate(path.read_text(encoding="utf-8-sig").splitlines()):
+        line=line.strip()
+        if not line or line.startswith('#'):continue
+        try:rows.append((float(line.split(',')[0]),[float(c) for c in line.split(',')],i+1))
+        except ValueError:
+            if rows:raise ValueError(f'{path}: unreadable forcing row {i+1}: {line!r}')
+    rows.sort(key=lambda r:r[0])
+    for (t0,a,l0),(t1,b,l1) in zip(rows,rows[1:]):
+        if t0<=time_h<=t1:
+            if time_h==t0 or t1==t0:values,lines=a,[l0]
+            elif time_h==t1:values,lines=b,[l1]
+            else:
+                f=(time_h-t0)/(t1-t0);values=[x+(y-x)*f for x,y in zip(a,b)];lines=[l0,l1]
+            return {**dict(zip(FORCING_COLUMNS,values)),'source_lines':lines}
+    if len(rows)==1 and rows[0][0]==time_h:return {**dict(zip(FORCING_COLUMNS,rows[0][1])),'source_lines':[rows[0][2]]}
     raise ValueError(f'{path}: time_h {time_h} outside the forcing rows')
 
 

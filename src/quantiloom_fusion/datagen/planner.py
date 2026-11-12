@@ -18,7 +18,12 @@ from .renderer import QuantiloomCli
 from .scene import canonicalize, read_gltf, reject_motion, resolve_asset, scene_for_band
 from .sensor import sensor_config
 from .settings import positive, read_settings
-from .solar import forcing_direct, reference_direct, solar_extension
+from .solar import forcing_direct, forcing_row, reference_direct, solar_extension
+
+# [atmosphere] keys the air derivation owns. rh is the fraction the renderer
+# resolves both humidity keys to; t_ground_K is the air temperature its NN
+# atmosphere and thermal sky use; air_temperature_k feeds the clear-sky model.
+AIR_KEYS=('t_ground_K','air_temperature_k','rh','relative_humidity')
 
 
 def _agrees(a,b,path=''):
@@ -120,6 +125,28 @@ def plan(config: Path,out: Path,renderer=None):
                 reference_lut=canonical_path(lut),reference_column=columns[0],reference_direct_w_m2=reference,
                 forcing_ratio=measured/reference,arm_scale=arm_scale)
             solar_scale=arm_scale*measured/reference
+        air={'policy':d['atmosphere_air']}
+        if d['atmosphere_air']=='forcing_row' and d['atmosphere_mode']=='source' and base.get('atmosphere'):
+            # The thermal solve heats the ground with the forcing file's air and
+            # humidity at the entry's hour, while the renderer's sky and path
+            # radiance follow [atmosphere]; derive the latter from the same row
+            # for every entry, day and night alike, so the air that warmed the
+            # ground is the air the camera looks through. Presets (aerosol,
+            # visibility) stay as the scene states them.
+            thermal=base.get('thermal',{})
+            if not thermal.get('forcing_file') or 'time_h' not in thermal:
+                raise ValueError(f'scene {definition["id"]}: atmosphere_air="forcing_row" needs [thermal] forcing_file and time_h')
+            stated=[k for k in AIR_KEYS if k in definition.get('overrides',{}).get('atmosphere',{})]
+            if stated:
+                raise ValueError(f'scene {definition["id"]}: [atmosphere] states {stated} by hand; atmosphere_air="forcing_row" derives them from the forcing file')
+            forcing=resolve_asset(thermal['forcing_file'],source.parent,qt,cli_root);assets.add(forcing)
+            row=forcing_row(forcing,float(thermal['time_h']))
+            if 'relative_humidity' not in row:raise ValueError(f'{forcing}: atmosphere_air="forcing_row" needs the relative_humidity column')
+            written={'t_ground_K':row['air_temperature_k'],'air_temperature_k':row['air_temperature_k'],'rh':round(row['relative_humidity']/100,12)}
+            # A copy: the override table is part of the recorded settings.
+            base['atmosphere']={**{k:v for k,v in base['atmosphere'].items() if k not in AIR_KEYS},**written}
+            air.update(forcing_file=canonical_path(forcing),time_h=float(thermal['time_h']),source_lines=row['source_lines'],
+                air_temperature_k=row['air_temperature_k'],relative_humidity_pct=row['relative_humidity'],written=written)
         if (d['solar_ir_policy']=='planck_tail' or solar_scale!=1.0) and base.get('lighting',{}).get('solar_lut'):
             solar=out/'provenance'/('solar_'+definition['id']+'.csv')
             # The source hash is part of the frozen recipe; this derived file is
@@ -133,7 +160,7 @@ def plan(config: Path,out: Path,renderer=None):
             'ir_refractive_index':('scene nk bindings kept only where source data covers the band; bound materials otherwise use measured reflectance' if d['ir_materials']=='spectral'
                                   else 'scene/default real index; source nk bindings omitted in IR'),
             'ir_solar_tail':'5778 K Planck shape anchored to final source CSV row' if solar else 'source CSV unchanged',
-            'solar_scale':solar_scale,'solar_scale_derivation':derivation,
+            'solar_scale':solar_scale,'solar_scale_derivation':derivation,'atmosphere_air':air,
             'vis_response':'authored generic RGB QE curves, Bayer RGGB; not measured camera calibration'}})
         for ai,ei,ri,rep in product(range(len(settings['sampling']['azimuths_deg'])),range(len(settings['sampling']['elevations_deg'])),range(len(settings['sampling']['radius_scales'])),range(settings['sampling']['repeats'])):
             az=settings['sampling']['azimuths_deg'][ai];el=settings['sampling']['elevations_deg'][ei];rs=settings['sampling']['radius_scales'][ri]

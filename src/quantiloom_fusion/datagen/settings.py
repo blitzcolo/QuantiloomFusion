@@ -57,7 +57,7 @@ def read_settings(path):
     doc=tomllib.loads(path.read_text(encoding="utf-8-sig"))
     check_keys(doc,{"dataset","sampling","scenes","cameras","reference_subset"},"root")
     d=doc["dataset"]
-    check_keys(d,{"name","qt_root","cli","seed","spp","wavelength_samples","thermal_mode","atmosphere_mode","atmosphere_model_pack","solar_ir_policy","daylight_solar_scale","ir_materials","noise_seed_policy","geometry_truth","verification","closure_audit_every"},"dataset")
+    check_keys(d,{"name","qt_root","cli","seed","spp","wavelength_samples","thermal_mode","atmosphere_mode","atmosphere_model_pack","solar_ir_policy","daylight_solar_scale","atmosphere_air","ir_materials","noise_seed_policy","geometry_truth","verification","closure_audit_every"},"dataset")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+",d["name"]):raise ValueError("unsafe dataset name")
     for k in ("spp","wavelength_samples"):positive(d[k],k,True)
     if type(d["seed"]) is not int or not 0<=d["seed"]<=0xffffffff:raise ValueError("seed must be uint32")
@@ -67,6 +67,7 @@ def read_settings(path):
     if d["atmosphere_mode"] not in ("source","off"):raise ValueError("atmosphere_mode must be source or off")
     if d["solar_ir_policy"] not in ("planck_tail","source"):raise ValueError("solar_ir_policy must be planck_tail or source")
     if d.get("daylight_solar_scale") not in ("forcing_direct","none"):raise ValueError("daylight_solar_scale must be forcing_direct or none")
+    if d.get("atmosphere_air") not in ("forcing_row","none"):raise ValueError("atmosphere_air must be forcing_row or none")
     if d["ir_materials"] not in ("constant","spectral"):raise ValueError("ir_materials must be constant or spectral")
     if d["noise_seed_policy"] not in ("fixed_detector","per_sample","per_acquisition"):raise ValueError("noise_seed_policy must be fixed_detector, per_sample or per_acquisition")
     if "atmosphere_model_pack" in d:

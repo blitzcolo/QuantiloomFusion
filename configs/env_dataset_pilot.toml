@@ -11,6 +11,7 @@
 "atmosphere_model_pack" = "H:/Quantiloom-dev/assets/atmos_models"
 "solar_ir_policy" = "planck_tail"
 "daylight_solar_scale" = "forcing_direct"
+"atmosphere_air" = "forcing_row"
 "ir_materials" = "spectral"
 "noise_seed_policy" = "per_acquisition"
 "geometry_truth" = true
@@ -71,10 +72,6 @@
 "icld" = 0
 "vis_km" = 23
 "rainrt_mm_h" = 0
-"t_ground_K" = 300.0
-"air_temperature_k" = 300.0
-"rh" = 0.48
-"relative_humidity" = 48
 "p_hPa" = 1013.25
 "h2o_scale" = 1
 "sky_model" = "isotropic"
@@ -119,10 +116,6 @@
 "icld" = 0
 "vis_km" = 23
 "rainrt_mm_h" = 0
-"t_ground_K" = 300.0
-"air_temperature_k" = 300.0
-"rh" = 0.48
-"relative_humidity" = 48
 "p_hPa" = 1013.25
 "h2o_scale" = 1
 "sky_model" = "isotropic"

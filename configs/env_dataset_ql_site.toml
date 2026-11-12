@@ -26,6 +26,8 @@ atmosphere_model_pack = "H:/Quantiloom-dev/assets/atmos_models"
 solar_ir_policy = "planck_tail"
 # No forcing file (authored temperatures): the reference sun is used as is.
 daylight_solar_scale = "none"
+# The site states its own air (no forcing file to derive it from).
+atmosphere_air = "none"
 ir_materials = "spectral"
 noise_seed_policy = "per_acquisition"
 geometry_truth = true

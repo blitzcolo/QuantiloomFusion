@@ -122,3 +122,18 @@ def test_free_search_control_returns_a_warp_with_search_range_of_the_sweep():
     oracle = oracle_warp(ref, src, ref_band=Band.VIS, src_band=Band.LWIR)
     homography = InfinityHomographyRegistrar().estimate(*obs(ref, src), None, None)
     assert registration_error(warp, oracle)["epe_median"] < registration_error(homography, oracle)["epe_median"]
+
+
+def test_free_search_can_use_the_sweeps_own_step():
+    ref, src, img_ref, img_src = plane_pair()
+    params = SweepParams(similarity=Similarity.GRAD_NCC, n_hypotheses=N_HYP, z_min_m=Z_MIN)
+    fine = FreeSearchRegistrar(params, step_px="sweep").estimate(*obs(ref, src), img_ref, img_src)
+    sweep_step = 80.0 * BASELINE_M * (1 / Z_MIN) / (N_HYP - 1)  # f_src * b * delta_d = 2 px
+    assert fine.provenance["step_px"] == pytest.approx(sweep_step, rel=0.05)
+    assert fine.provenance["step_rule"] == "sweep"
+    half = int(np.ceil(fine.provenance["max_displacement_px"] / fine.provenance["step_px"]))
+    assert fine.provenance["n_offsets"] == (2 * half + 1) ** 2
+    coarse = FreeSearchRegistrar(params, step_px=1.0).estimate(*obs(ref, src), img_ref, img_src)
+    assert coarse.provenance["step_rule"] == "fixed" and coarse.provenance["step_px"] == 1.0
+    with pytest.raises(ValueError, match="step_px"):
+        FreeSearchRegistrar(params, step_px=0.0)

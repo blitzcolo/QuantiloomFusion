@@ -187,18 +187,31 @@ def _scale(ref: Observation, src: Observation) -> float:
 
 
 class FreeSearchRegistrar(Registrar):
-    """Control: 2D integer-grid offset search around the infinity homography.
+    """Control: 2D grid offset search around the infinity homography.
 
     The search square is +-D with D the epipolar sweep's maximum displacement
-    (|u'(d_max) - u'(0)| over the image), so only the epipolar constraint
-    differs. Same similarity, saliency, texture and structure gates; no left-right check.
+    (|u'(d_max) - u'(0)| over the image). Same similarity, saliency, texture
+    and structure gates; no left-right check. step_px is the grid spacing:
+    a number of pixels, or "sweep" for the epipolar sweep's own step (the
+    median displacement between neighbouring inverse-depth hypotheses), so
+    that the epipolar constraint is the only difference -- at 1 px the
+    comparison also mixes in the sweep's sub-pixel resolution.
     """
 
     name = "free_search"
 
-    def __init__(self, params: SweepParams | None = None, step_px: float = 1.0) -> None:
+    def __init__(self, params: SweepParams | None = None, step_px: float | str = 1.0) -> None:
+        if not (step_px == "sweep" or (isinstance(step_px, (int, float)) and step_px > 0)):
+            raise ValueError(f'step_px must be a positive number or "sweep", got {step_px!r}')
         self.params = params or SweepParams()
         self.step_px = step_px
+
+    def sweep_step_px(self, rig: _Rig) -> float:
+        """Median source-pixel displacement between neighbouring sweep hypotheses."""
+        p = self.params
+        step_d = (1.0 / p.z_min_m) / max(p.n_hypotheses - 1, 1)
+        base, _ = _project(rig, 0.0)
+        return float(np.nanmedian(np.linalg.norm(_project(rig, step_d)[0] - base, axis=2)))
 
     def estimate(self, ref: Observation, src: Observation, ref_image: np.ndarray,
                  src_image: np.ndarray) -> Warp:
@@ -207,13 +220,14 @@ class FreeSearchRegistrar(Registrar):
         base, _ = _project(rig, 0.0)
         far, _ = _project(rig, 1.0 / p.z_min_m)
         max_disp = float(np.nanmax(np.linalg.norm(far - base, axis=2)))
-        half = max(1, int(np.ceil(max_disp / self.step_px)))
-        axis = np.arange(-half, half + 1) * self.step_px
+        step = self.sweep_step_px(rig) if self.step_px == "sweep" else float(self.step_px)
+        half = max(1, int(np.ceil(max_disp / step)))
+        axis = np.arange(-half, half + 1) * step
         offsets = np.array([(dx, dy) for dy in axis for dx in axis])
-        grid_dist = np.abs(np.rint(offsets[:, None] / self.step_px) - np.rint(offsets[None] / self.step_px)).max(axis=2)
+        grid_dist = np.abs(np.rint(offsets[:, None] / step) - np.rint(offsets[None] / step)).max(axis=2)
         prep = prepare(ref.geometry, gs, ref_image, src_image, p)
         scores = _score_stack(prep.ref_f, prep.src, (base + o for o in offsets), gs, p, prep.rng)
-        best_idx, saliency, confident = _pick(scores, grid_dist, math.ceil(p.separation_px / self.step_px), prep.tex, p)
+        best_idx, saliency, confident = _pick(scores, grid_dist, math.ceil(p.separation_px / step), prep.tex, p)
         confident &= structure_ok(prep, base + offsets[best_idx], p.noise_factor)
         shift = np.where(confident[..., None], offsets[best_idx], 0.0)
         map_xy = base + shift
@@ -226,7 +240,8 @@ class FreeSearchRegistrar(Registrar):
                 "method": self.name,
                 "similarity": str(p.similarity),
                 "max_displacement_px": max_disp,
-                "step_px": self.step_px,
+                "step_px": step,
+                "step_rule": "sweep" if self.step_px == "sweep" else "fixed",
                 "n_offsets": len(offsets),
                 "offset_map": shift,
                 "confidence": np.where(confident, saliency, 0.0),

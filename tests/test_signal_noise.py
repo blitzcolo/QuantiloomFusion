@@ -12,6 +12,7 @@ from quantiloom_fusion.signal.noise import (
     estimate_dsdt,
     parse_noise_config,
     photon_sigma_e,
+    thermal_sigma_k,
     total_electrons,
 )
 
@@ -57,12 +58,63 @@ def test_photon_sigma_uses_total_electrons_not_net_signal():
     assert electrons_from_raw(np.array([10.0, 110.0]), cfg).tolist() == [0.0, 500.0]
 
 
-def test_fixed_pattern_noise_is_a_switch():
-    cfg = parse_noise_config(TOML.format(detector="photon"))
+FPN = TOML.replace("[sensor.photon]\n", """[sensor.photon]
+apply_nuc = true
+nuc_residual_fraction = 0.03
+enable_fpn = true
+dsnu_reference_exposure_s = 1
+column_gain_sigma = 0.02
+column_offset_e_rms = 3
+row_gain_sigma = 0.01
+row_offset_e_rms = 2
+""")
+THERMAL_FPN = TOML.replace("[sensor.thermal]\n", """[sensor.thermal]
+enable_fpn = true
+apply_nuc = true
+nuc_residual_fraction = 0.03
+fpn_gain_sigma = 0.016
+fpn_offset_k = 1.1
+fpn_column_gain_sigma = 0.023
+fpn_column_offset_k = 1.55
+fpn_row_gain_sigma = 0.01
+fpn_row_offset_k = 0.65
+""")
+
+
+def test_fixed_pattern_noise_is_a_switch_that_reads_every_component():
+    assert photon_sigma_e(1000.0, parse_noise_config(TOML.format(detector="photon")), fpn=True) == \
+        pytest.approx(np.sqrt(1009.0))  # config without enable_fpn: no pattern
+    cfg = parse_noise_config(FPN.format(detector="photon"))
     off = photon_sigma_e(1000.0, cfg)
-    on = photon_sigma_e(1000.0, cfg, fpn=True)
-    assert on == pytest.approx(np.sqrt(1000.0 + 9.0 + (0.01 * 1000.0) ** 2 + 16.0))
-    assert on > off
+    # Light = total - mean dark (10 e/s * 2 s); DSNU scales with exposure/reference (2/1).
+    pattern = (0.01**2 + 0.02**2 + 0.01**2) * 980.0**2 + (4.0 * 2.0) ** 2 + 3.0**2 + 2.0**2
+    raw = photon_sigma_e(1000.0, cfg, fpn=True, product="rawdn")
+    corrected = photon_sigma_e(1000.0, cfg, fpn=True, product="corrected")
+    assert raw == pytest.approx(np.sqrt(1009.0 + pattern))
+    assert corrected == pytest.approx(np.sqrt(1009.0 + 0.03**2 * pattern))
+    assert off < corrected < raw
+
+
+def test_thermal_fixed_pattern_counts_offsets_and_optionally_the_gain():
+    cfg = parse_noise_config(THERMAL_FPN.format(detector="thermal"))
+    offsets = 1.1**2 + 1.55**2 + 0.65**2
+    assert thermal_sigma_k(cfg) == pytest.approx(0.05)
+    assert thermal_sigma_k(cfg, fpn=True) == pytest.approx(np.sqrt(0.05**2 + 0.03**2 * offsets))
+    assert thermal_sigma_k(cfg, fpn=True, product="rawdn") == pytest.approx(np.sqrt(0.05**2 + offsets))
+    gain = 0.016**2 + 0.023**2 + 0.01**2
+    assert thermal_sigma_k(cfg, fpn=True, gain_signal_k=75.0) == \
+        pytest.approx(np.sqrt(0.05**2 + 0.03**2 * (offsets + gain * 75.0**2)))
+
+
+def test_photon_detector_windowed_in_kelvin_converts_through_dsdt(dataset):
+    cfg = parse_noise_config(TOML.format(detector="photon"))
+    obs = next(iter(dataset)).observations[Band.LWIR]
+    kelvin = IrTemperature(window_k=(260.0, 340.0))
+    normalized_input(dataset, obs, kelvin)
+    sigma, info = band_sigma(cfg, kelvin, total_e=np.array([500.0]), dsdt=-50.0)
+    assert sigma[0] == pytest.approx(np.sqrt(509.0) / 50.0 / 80.0) and info["unit"] == "K"
+    with pytest.raises(ValueError, match="dsdt"):
+        band_sigma(cfg, kelvin, total_e=np.array([500.0]))
 
 
 def test_vis_sigma_divides_by_the_adc_span(dataset):

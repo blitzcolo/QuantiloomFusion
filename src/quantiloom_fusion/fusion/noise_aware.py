@@ -9,11 +9,20 @@ soft-thresholds every band's coefficients (reference included) with
 c * max(0, 1 - kappa * sigma / |c|), so selection compares shrunk magnitudes
 and pure-noise regions inject no detail. The masked baseline is the same
 code without shrinkage.
+
+The per-level noise std is sigma times a per-level gain. Every band reaches
+the pyramid through its own processing chain -- VIS through demosaic, white
+balance and the luminance sum, MWIR/LWIR through the warp's resampling onto
+the reference grid -- none of which leaves the noise white, so the gain is
+measured per band by pushing unit white noise through that chain and the
+same pyramid (``chain_level_gains``). ``level_noise_gain`` is the white
+special case.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import hashlib
+from collections.abc import Callable, Mapping
 from functools import lru_cache
 
 import cv2
@@ -21,6 +30,7 @@ import numpy as np
 from scipy import ndimage
 
 from ..core.bands import BANDS, Band
+from ..geometry.warp import Warp, apply_warp
 from .align import aligned_sources
 from .base import Capabilities, FusionInput, FusionMethod, FusionOutput
 from .classical import _CAPS, LaplacianPyramid
@@ -66,6 +76,77 @@ def level_noise_gain(levels: int) -> tuple[float, ...]:
     return tuple(float(np.sqrt(e * 4.0 ** (lv - levels))) for lv, e in enumerate(energy))
 
 
+def chain_level_gains(chain: Callable[[np.ndarray], np.ndarray], native_shape: tuple[int, int],
+                      levels: int, realisations: int = 4, seed: int = 0) -> tuple[float, ...]:
+    """Std of each detail level for unit white noise on the native grid pushed through ``chain``.
+
+    ``chain`` maps a native-grid image to the image the pyramid sees (NaN
+    where it has no value). Measured over the pixels whose level-l
+    coefficient lies at least 4 * 2**l px from a missing value (all finite
+    pixels when none does), averaged
+    over ``realisations`` seeded draws. For the identity chain this
+    reproduces level_noise_gain up to sampling error.
+    """
+    rng = np.random.default_rng(seed)
+    energy, count = np.zeros(levels), np.zeros(levels)
+    for _ in range(realisations):
+        out = np.asarray(chain(rng.standard_normal(native_shape)), np.float64)
+        finite = np.isfinite(out)
+        laps = LaplacianPyramid._pyramid(np.where(finite, out, 0.0), levels)
+        # Distance to the nearest missing value; the image border is not one
+        # (the pyramid reflects there).
+        depth = ndimage.distance_transform_edt(finite) if not finite.all() else np.full(finite.shape, np.inf)
+        for lv in range(levels):
+            step = 2**lv
+            crop = (slice(0, laps[lv].shape[0]), slice(0, laps[lv].shape[1]))
+            inner = (depth > 4 * step)[::step, ::step][crop]
+            if not inner.any():  # a footprint smaller than the margin: use all of it
+                inner = finite[::step, ::step][crop]
+            energy[lv] += float(np.sum(laps[lv][inner] ** 2))
+            count[lv] += int(inner.sum())
+    if (count == 0).any():
+        raise ValueError("the chain returned no finite pixels")
+    return tuple(float(g) for g in np.sqrt(energy / count))
+
+
+_WARP_GAINS: dict[tuple, tuple[float, ...]] = {}
+
+
+def _warp_key(band: Band, native_shape: tuple[int, int], warp: Warp, levels: int) -> tuple:
+    # The resampling ratio of a fixed camera pair barely changes between
+    # samples, so the gain is cached per band and ratio (to 1e-3).
+    m = warp.map_xy[warp.support]
+    if m.size == 0:
+        return (band, native_shape, levels, hashlib.sha1(warp.map_xy.tobytes()).hexdigest())
+    dx = np.nanmedian(np.diff(warp.map_xy[..., 0], axis=1)[warp.support[:, 1:]])
+    dy = np.nanmedian(np.diff(warp.map_xy[..., 1], axis=0)[warp.support[1:, :]])
+    return (band, native_shape, warp.map_xy.shape[:2], levels, round(float(dx), 3), round(float(dy), 3))
+
+
+def band_level_gains(x: FusionInput, band: Band, levels: int,
+                     chains: Mapping[Band, Callable[[np.ndarray], np.ndarray]] | None = None) -> tuple[float, ...]:
+    """Per-level noise gain of one band: its native chain (if any), then its warp.
+
+    The reference band without a native chain is white (level_noise_gain).
+    A source band is pushed through ``chains[band]`` (identity if absent) and
+    the same bilinear warp ``aligned_sources`` uses; without a native chain
+    the result is cached per band and resampling ratio.
+    """
+    native = (chains or {}).get(band)
+    shape = np.asarray(x.images[band]).shape[:2]
+    if band == x.reference:
+        return level_noise_gain(levels) if native is None else chain_level_gains(native, shape, levels)
+    warp = x.warps[band]
+    pre = native or (lambda n: n)
+    run = lambda n: apply_warp(pre(n), warp, "linear")  # noqa: E731
+    if native is not None:
+        return chain_level_gains(run, shape, levels)
+    key = _warp_key(band, shape, warp, levels)
+    if key not in _WARP_GAINS:
+        _WARP_GAINS[key] = chain_level_gains(run, shape, levels)
+    return _WARP_GAINS[key]
+
+
 def shrink(c: np.ndarray, sigma: Sigma, kappa: float) -> np.ndarray:
     """Soft threshold c * max(0, 1 - kappa*sigma/|c|); 0 where c == 0."""
     c = np.asarray(c, np.float64)
@@ -106,12 +187,16 @@ def _extend(img: np.ndarray, var: np.ndarray, valid: np.ndarray) -> tuple[np.nda
 
 
 def _fuse_masked(x: FusionInput, requested_levels: int, kappa: float | None,
-                 sigmas: Mapping[Band, Sigma] | None) -> FusionOutput:
+                 sigmas: Mapping[Band, Sigma] | None, gain_model: str = "white",
+                 chains: Mapping[Band, Callable[[np.ndarray], np.ndarray]] | None = None) -> FusionOutput:
     images, supports = aligned_sources(x)
     bands = [b for b in BANDS if b in images]
     shape = np.asarray(images[bands[0]]).shape[:2]
     levels = pyramid_levels(shape, requested_levels)
-    gains = level_noise_gain(levels)
+    if sigmas is None or gain_model == "white":
+        band_gains = {b: level_noise_gain(levels) for b in bands}
+    else:
+        band_gains = {b: band_level_gains(x, b, levels, chains) for b in bands}
 
     laps, weights, sigma_levels = [], [], []
     for b in bands:
@@ -121,7 +206,7 @@ def _fuse_masked(x: FusionInput, requested_levels: int, kappa: float | None,
         img, var = _extend(np.asarray(images[b], np.float64), var, valid)
         laps.append(LaplacianPyramid._pyramid(img, levels))
         weights.append(gaussian_pyramid(valid.astype(np.float64), levels))
-        sigma_levels.append([_level_sigma(var, lv, gains[lv]) for lv in range(levels)])
+        sigma_levels.append([_level_sigma(var, lv, band_gains[b][lv]) for lv in range(levels)])
 
     fused = []
     for lv in range(levels):
@@ -138,7 +223,8 @@ def _fuse_masked(x: FusionInput, requested_levels: int, kappa: float | None,
         out = cv2.pyrUp(out, dstsize=(level.shape[1], level.shape[0])) + level
     extras = {"support": supports, "levels": levels, "kappa": kappa,
               "sigma_level": {b: [float(np.median(a)) for a in sl] for b, sl in zip(bands, sigma_levels)},
-              "fused_detail": fused}
+              "fused_detail": fused, "gain_model": gain_model if sigmas is not None else None,
+              "level_gain": {b: list(g) for b, g in band_gains.items()}}
     return FusionOutput(np.clip(out, 0.0, 1.0).astype(np.float32), extras)
 
 
@@ -160,16 +246,27 @@ class MaskedLaplacianPyramid(FusionMethod):
 class NoiseAwarePyramid(FusionMethod):
     """Masked Laplacian fusion with per-band, per-level soft-threshold shrinkage.
 
-    sigma maps each band to the std of its normalised noise on the reference
-    grid (scalar or (H, W) array; see signal.noise.band_sigma). kappa is the
-    shrinkage strength (2 to 3). noise_info is echoed into extras (spans,
-    fixed-pattern switch, ...) for provenance.
+    sigma maps each band to the std of its normalised noise per native
+    pixel, given on the reference grid (scalar or (H, W) array: a per-pixel
+    map resampled onto the reference grid; see signal.noise.band_sigma) --
+    the std before resampling, which the per-level gains then account for.
+    gain_model "chain" (default) measures each band's gains through its
+    processing chain (``band_level_gains``; ``chains`` gives native chains
+    such as signal.noise.vis_luminance_chain), "white" uses
+    level_noise_gain for every band. kappa is the shrinkage strength (2 to
+    3). noise_info is echoed into extras (spans, fixed-pattern switch, ...)
+    for provenance.
     """
 
     capabilities: Capabilities = _CAPS
 
     def __init__(self, sigma: Mapping[Band, Sigma], levels: int = 4, kappa: float = 2.5,
-                 noise_info: dict | None = None):
+                 noise_info: dict | None = None, gain_model: str = "chain",
+                 chains: Mapping[Band, Callable[[np.ndarray], np.ndarray]] | None = None):
+        if gain_model not in ("chain", "white"):
+            raise ValueError(f"gain_model must be 'chain' or 'white', got {gain_model!r}")
+        self.gain_model = gain_model
+        self.chains = dict(chains) if chains else {}
         self.sigma = dict(sigma)
         self.levels = levels
         self.kappa = float(kappa)
@@ -180,6 +277,6 @@ class NoiseAwarePyramid(FusionMethod):
         missing = set(x.images) - set(self.sigma)
         if missing:
             raise ValueError(f"{self.name}: no sigma for bands {sorted(missing)}")
-        out = _fuse_masked(x, self.levels, self.kappa, self.sigma)
+        out = _fuse_masked(x, self.levels, self.kappa, self.sigma, self.gain_model, self.chains)
         out.extras["noise_info"] = self.noise_info
         return out

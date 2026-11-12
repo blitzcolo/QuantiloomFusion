@@ -7,12 +7,18 @@ import pytest
 from quantiloom_fusion.core.bands import Band
 from quantiloom_fusion.fusion import available, create
 from quantiloom_fusion.fusion.classical import LaplacianPyramid
+import math
+
+from quantiloom_fusion.dataset.types import Readout
 from quantiloom_fusion.fusion.noise_aware import (
+    chain_level_gains,
     fuse_coefficients,
     level_noise_gain,
     shrink,
 )
 from quantiloom_fusion.geometry import Warp
+from quantiloom_fusion.geometry.warp import apply_warp
+from quantiloom_fusion.signal.noise import vis_luminance_chain
 
 from test_fusion_align import _input
 
@@ -172,3 +178,65 @@ def test_missing_sigma_and_extras():
                  noise_info={"fpn": False}).fuse(x)
     assert out.extras["kappa"] == 2.5 and out.extras["noise_info"] == {"fpn": False}
     assert set(out.extras["support"]) == {Band.VIS, Band.LWIR}
+
+
+def _upsample(ratio, ref=(480, 640)):
+    # A source grid 1/ratio the reference's, resampled bilinearly onto it.
+    h, w = ref
+    native = (math.ceil((h - 1) / ratio) + 1, math.ceil((w - 1) / ratio) + 1)
+    j, i = np.meshgrid(np.arange(w), np.arange(h))
+    warp = Warp(Band.VIS, Band.LWIR, np.dstack([j / ratio, i / ratio]).astype(np.float64), np.ones(ref, bool))
+    return native, warp, (lambda n: apply_warp(n, warp, "linear"))
+
+
+def _chain(name):
+    if name == "vis_demosaic_luma":
+        readout = Readout("rggb", 12, 0.0, 1.0, 1.0, (2.0, 1.0, 1.5), (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+        return (480, 640), vis_luminance_chain(readout)
+    native, _, chain = _upsample({"lwir_x1.74": 1.74, "mwir_x1.17": 1.17}[name])
+    return native, chain
+
+
+def _survival(chain, native, gains, kappa=3.0, sigma=0.01, draws=4):
+    # Fraction of pure-noise detail coefficients a soft threshold keeps, per level.
+    kept, total = np.zeros(LEVELS), np.zeros(LEVELS)
+    for seed in range(draws):
+        noise = np.random.default_rng(100 + seed).standard_normal(native) * sigma
+        laps = LaplacianPyramid._pyramid(np.asarray(chain(noise), np.float64), LEVELS)
+        for lv, g in enumerate(gains):
+            c = laps[lv][4:-4, 4:-4]
+            kept[lv] += np.count_nonzero(shrink(c, sigma * g, kappa))
+            total[lv] += c.size
+    return list(kept / total)
+
+
+@pytest.mark.parametrize("name", ["lwir_x1.74", "mwir_x1.17", "vis_demosaic_luma"])
+def test_chain_gains_make_pure_noise_survival_match_the_gaussian_tail_at_every_level(name):
+    native, chain = _chain(name)
+    tail = math.erfc(3.0 / math.sqrt(2.0))  # P(|c| > 3 sigma) = 0.0027
+    measured = chain_level_gains(chain, native, LEVELS)
+    for level, frac in enumerate(_survival(chain, native, measured)):
+        assert 0.3 * tail < frac < 3.0 * tail, (level, frac)
+    # The white-noise gain misstates at least one level by a large factor.
+    white = _survival(chain, native, level_noise_gain(LEVELS))
+    assert max(white) > 5 * tail or min(white) < 0.2 * tail, white
+
+
+def test_identity_chain_reproduces_the_white_noise_gain():
+    measured = chain_level_gains(lambda n: n, (256, 256), LEVELS)
+    np.testing.assert_allclose(measured, level_noise_gain(LEVELS), rtol=0.03)
+
+
+def test_noise_aware_fusion_uses_the_warp_chain_gains_by_default():
+    native, warp, _ = _upsample(1.74, (H, W))
+    rng = np.random.default_rng(0)
+    x = _input({Band.VIS: rng.random((H, W)).astype(np.float32), Band.LWIR: rng.random(native).astype(np.float32)},
+               {Band.LWIR: warp})
+    out = create("noise_aware_pyramid", sigma={Band.VIS: 0.01, Band.LWIR: 0.01}).fuse(x)
+    white = level_noise_gain(LEVELS)
+    assert out.extras["gain_model"] == "chain"
+    assert out.extras["level_gain"][Band.VIS] == list(white)
+    assert out.extras["level_gain"][Band.LWIR][0] < 0.7 * white[0]
+    assert out.extras["level_gain"][Band.LWIR][-1] > 1.3 * white[-1]
+    plain = create("noise_aware_pyramid", sigma={Band.VIS: 0.01, Band.LWIR: 0.01}, gain_model="white").fuse(x)
+    assert plain.extras["level_gain"][Band.LWIR] == list(white)

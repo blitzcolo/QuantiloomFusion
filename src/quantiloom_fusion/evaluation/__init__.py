@@ -9,3 +9,14 @@ from .metrics import (
     SpatialFrequency,
     StandardDeviation,
 )
+from .perturb import inverse_depth_bias_warp, smooth_field_warp
+from .protocol import (
+    PerturbationKind,
+    Sweep,
+    evaluate_point,
+    inflation_experiment,
+    is_calibrated,
+    sensitivity_curve,
+)
+from .scene import EvalScene, InputSpec, build_scene, load_scene
+from .truth_ref import TruthMode, truth_reference

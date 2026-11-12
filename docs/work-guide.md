@@ -468,6 +468,7 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 | 2026-10-26 | 接受 0.8.x 的新缺省：`sky_distribution = "clear"`、非制冷 LWIR 预设 NETD 带宽 15 Hz；不钉旧值 | 两者都更符合物理（后者让相机真正交付配置声明的 50 mK）；铉 `uniform` 也复现不了 0.7.4 的天空像素 |
 | 2026-10-26 | 保留 `lighting.atmosphere_temperature_k`（虽然 0.8.3 告警已弃用） | `atmosphere_mode = "off"` 消融臂关闭 NN 大气后，它仍是热天空回退值 |
 | 2026-10-26 | ql_site 实测扫描场景单独成配置 `configs/env_dataset_ql_site.toml`，不并入正式配置 | 用户要求引用它作融合场景。它没有 `[thermal]`（authored 温度）、采样也不同（俯仰 45°、半径 300 m），并入会改变正式配方；大气从源配置的 disabled 覆盖为 NN `clear` 预设（300 m 斜距下 IR 路径项不可忽略） |
+| 2026-11-12 | 海边场景采集时刻按现状冻结（16 h，直射缩放 0.7381，大气取 forcing 第 43 行 299.86 K / 68.3 %；夜间与低照度取第 50 行 23:00） | 用户决定（导师建议挪到太阳天顶角 38°–48° 尚未定）。本仓库无需改代码：缩放与大气都由生成器从 Qt 场景文件和 forcing 推导；若用户通知改时刻，先改 Quantiloom-Qt 的场景文件并重新生成 forcing，再重新 `plan` 到新目录，并核对 seaside 三个条目各自重复写出的 `[thermal]`、太阳方向与 23:00 的强迫值 |
 | 2026-11-12 | 配准口径的真值参考 = 同一算子在共视点干净图上、各源波段以 oracle 融合支撑为掩码（遮挡处同样退回参考波段）；融合算子口径与遮挡层仍用全掩码参考 | 用户决定。全掩码参考在遮挡区有源相机看不到的红外，任何配准都拿不到，oracle 在遮挡缝附近因此不是上界；按 oracle 支撑构造后它是这一对相机在完美配准下能给出的结果 |
 | 2026-11-12 | 渲染器身份除版本字符串外还按可执行文件 SHA-256 与 SHADERSET 摘要门控 | 用户决定。SDK 安装版 CLI 旁没有源码树，`physics_sources` 为空，同版本号的重新构建会被当成同一个渲染器；取代原"二进制只观察不门控"的做法（代价：同版本重编译也要新输出目录） |
 | 2026-11-12 | 全部 12 个条目的大气气温与湿度由生成器从 forcing 行推导（`atmosphere_air = "forcing_row"`），配置不再手填 | 用户决定。热求解与成像大气必须是同一团空气；白天沿用场景名义值时气温最多差 6 K，三种工况的处理方式也不一致。夜间值改为推导后数值不变，是回归检查 |
@@ -499,8 +500,8 @@ class ResultStore:   # 追加写 JSONL；键 = (dataset_id, sample_id, method �
 
 ## 9. 交接备忘
 
-- 当前停在（2026-11-12）：数据集配置与 Quantiloom 0.10.0、Qt 场景同步完成（夜间/低照度臂与白天同大气、576 样本、白天太阳谱按 forcing 直射缩放、夜间保留 1e-12 太阳表以推导吸收率、逐相机 NUC 与行列条纹、SDK 安装版 CLI、共视点无噪声参考子集与 sample v2、闭合审计分漫射/镜面）；`build/env-smoke-0.10.0`（6/6、参考 6/6）与 `build/env-pilot-0.10.0`（24/24、参考 12/12）已渲染并 `verify --inspect-exr`。第 6 章的分层掩码、极线扫描配准、噪声感知融合、评测口径、互补性分析、SuperFusion 零样本对照已实现入库（见进度表 2026-11-11 各行）。正式采集仍未启动：576 个三元组 + 144 次参考约 3 GPU 小时，用新目录（如 `build/env-three-band-0.10.0`），启动时冻结 datagen。
-- 待用户决定：俯仰角取值（12°/25°）、参考子集视角（0/90/180/270°、12°、中间距离）、κ（默认 2.5）、相似度（默认 `grad_ncc`）、是否加腐蚀后的 `correspondable_core` 评测组、夜间 1e-12 太阳表的绕行是否接受（或请 Quantiloom-dev 提供只用于推导吸收率的光谱入口）、SDK CLI 让 `physics_sources` 为空是否接受。
+- 当前停在（2026-11-12，审查修正之后）：配方侧——12 个条目的大气气温/湿度由生成器从 forcing 推导（`atmosphere_air`），配方按渲染器可执行文件 SHA-256 与 SHADERSET 门控，海边按现状冻结（16 h、0.7381）；正式采集仍未启动，配方已变，须用新目录（如 `build/env-three-band-0.10.0`）并在启动时冻结 datagen。评测侧——融合支撑与可对应掩码分开（oracle 含边缘带与天空）、配准口径参考用 oracle 支撑、遮挡层用高通偏离按足迹距离分档、噪声逐层增益按处理链、FPN 全分量、自由搜索可同步长、互补性加 R² 与场景内划分、闭合审计按镜面天顶角分档；第 6 章实验矩阵由 `python -m quantiloom_fusion.experiments protocol <config>` 出数（可续跑，配置样例 `configs/experiments/ch6_pilot.toml`）。
+- 待用户决定：俯仰角取值（12°/25°）、参考子集视角（0/90/180/270°、12°、中间距离）、κ（默认 2.5）、相似度（默认 `grad_ncc`）、是否加腐蚀后的 `correspondable_core` 评测组（融合支撑修正后它只是统计口径，不再是补救）、夜间 1e-12 太阳表绕行、海边采集时刻（等通知）、何时启动正式采集。遗留待查：夜间铬球约 3.3 K 的离散来源；场景内划分下岭回归在 seaside 上发散。
 - 此前状态（2026-10-13）：T4.5 完成。pilot 实验结果在 `build/experiments/pilot-baselines/`（`results.jsonl`、`summary.csv`、`variants.json`、`errors.jsonl`）。子集实验已在 Windows 上脱离启动（`configs/experiments/subset_baselines.toml`，约 96 × 60 s ≈ 1.6 小时），输出 `build/experiments/subset-baselines/`，终端日志 `build/_exp/subset-run.log`（输出有缓冲，进度看 `wc -l` 该目录的 `results.jsonl`）。中断了就用同一命令续跑：`cmd.exe /c "set UV_PROJECT_ENVIRONMENT=.venv-win&& uv run python -m quantiloom_fusion.experiments run configs/experiments/subset_baselines.toml"`（cwd 在仓库根）。子集采集已完成（0.7.4，生成器 `bbbf3e3`）。
 - 下一步（按依赖顺序）：
   0. 决定是否在 0.8.3 下重渲 pilot（约 17 分钟）与子集（约 70 分钟）并据此重跑实验（见「待决」）；正式采集用新目录（如 `build/env-three-band-0.10.0`），576 个三元组外推约 6.9 GPU 小时。

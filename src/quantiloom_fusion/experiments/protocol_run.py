@@ -100,7 +100,7 @@ _COMP = {"view_group_blocks"}
 class SensitivitySpec:
     bias: tuple[float, ...] = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05)
     field: tuple[float, ...] = (0.0, 0.5, 1.0, 2.0, 4.0)
-    corr_len_px: float = 8.0
+    corr_len_px: tuple[float, ...] = (8.0,)  # smooth-field correlation lengths; one sweep each
     seed: int = 0
     inflation: bool = True
 
@@ -159,6 +159,14 @@ def _numbers(value, key: str) -> tuple[float, ...]:
     return tuple(float(v) for v in value)
 
 
+def _corr_lengths(value) -> tuple[float, ...]:
+    """``sensitivity.corr_len_px``: one positive number or a non-empty list of them."""
+    values = _numbers(value if isinstance(value, list) else [value], "sensitivity.corr_len_px")
+    if any(v <= 0 for v in values):
+        raise _bad("sensitivity.corr_len_px", f"expected positive numbers, got {value!r}")
+    return values
+
+
 def load_protocol_config(path: Path) -> ProtocolConfig:
     data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     _check(data, _TOP, "")
@@ -206,7 +214,7 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
         sensitivity=SensitivitySpec(
             bias=_numbers(sens.get("bias", list(SensitivitySpec.bias)), "sensitivity.bias"),
             field=_numbers(sens.get("field", list(SensitivitySpec.field)), "sensitivity.field"),
-            corr_len_px=float(sens.get("corr_len_px", 8.0)), seed=int(sens.get("seed", 0)),
+            corr_len_px=_corr_lengths(sens.get("corr_len_px", 8.0)), seed=int(sens.get("seed", 0)),
             inflation=bool(sens.get("inflation", True))),
         registration_study=StudySpec(
             similarities=_choices(study, "similarities", tuple(str(s) for s in Similarity))
@@ -388,29 +396,33 @@ class _Run:
         if not sample.has_references:
             return
         s = self.cfg.sensitivity
-        sweeps = [(PerturbationKind.INVERSE_DEPTH_BIAS, s.bias), (PerturbationKind.SMOOTH_FIELD, s.field)]
+        # The inverse-depth bias has no correlation length (recorded as None); the smooth field gets
+        # one sweep per configured correlation length.
+        sweeps = [(PerturbationKind.INVERSE_DEPTH_BIAS, s.bias, None),
+                  *((PerturbationKind.SMOOTH_FIELD, s.field, c) for c in s.corr_len_px)]
         for op in self.cfg.operators:
-            for kind, amps in sweeps:
+            for kind, amps, corr in sweeps:
+                corr_arg = s.corr_len_px[0] if corr is None else corr  # unused by the bias sweep
                 for mode in TruthMode:
                     specs = {a: _base_spec(self.cfg) | {"item": "sensitivity", "perturbation": kind.value,
                                                          "amplitude": a, "truth_mode": mode.value,
-                                                         "corr_len_px": s.corr_len_px, "seed": s.seed}
+                                                         "corr_len_px": corr, "seed": s.seed}
                              | _operator_spec(self.cfg, op) for a in amps}
                     if not any(self.pending(sample.sid, sp, map(_layer_metric, _GROUPS)) for sp in specs.values()):
                         continue
                     oracle = sample.warps("oracle")
                     rows = sensitivity_curve(sample.scene, sample.operator(op, oracle),
-                                             Sweep(kind, amps, mode, s.corr_len_px, s.seed))
+                                             Sweep(kind, amps, mode, corr_arg, s.seed))
                     for row in rows:
                         self.put(sample.sid, specs[row["amplitude"]], _layer_metric(row["layer"]), _numeric(row))
                 if s.inflation:
                     spec = _base_spec(self.cfg) | {"item": "inflation", "perturbation": kind.value,
-                                                   "amplitudes": list(amps), "corr_len_px": s.corr_len_px,
+                                                   "amplitudes": list(amps), "corr_len_px": corr,
                                                    "seed": s.seed} | _operator_spec(self.cfg, op)
                     metrics = [f"amplitude_{a:g}" for a in amps]
                     if self.pending(sample.sid, spec, metrics):
                         rows = inflation_experiment(sample.scene, sample.operator(op, sample.warps("oracle")),
-                                                    Sweep(kind, amps, None, s.corr_len_px, s.seed))
+                                                    Sweep(kind, amps, None, corr_arg, s.seed))
                         for row in rows:
                             self.put(sample.sid, spec, f"amplitude_{row['amplitude']:g}", _numeric(row))
 

@@ -80,3 +80,26 @@ def test_a_changed_config_needs_a_new_name(tmp_path):
                       encoding="utf-8")
     with pytest.raises(ValueError, match="new experiment name"):
         run_protocol(config, out_root=out)
+
+
+def test_sensitivity_sweeps_every_correlation_length_and_the_bias_once(tmp_path):
+    root = build_fixture(tmp_path / "ds", samples=1, size=(32, 24), references=True)
+    config = tmp_path / "protocol.toml"
+    config.write_text(CONFIG.format(dataset=root.as_posix()).replace('items = ["matrix"]', 'items = ["sensitivity"]')
+                      + "\n[sensitivity]\nbias = [0.0, 0.01]\nfield = [0.0, 1.0]\ncorr_len_px = [8, 32]\n"
+                      "inflation = false\n", encoding="utf-8")
+    assert load_protocol_config(config).sensitivity.corr_len_px == (8.0, 32.0)
+    assert run_protocol(config, out_root=tmp_path / "out") == 0
+    rows = _rows(tmp_path / "out")
+    # 1 sample x 1 operator x (bias 2 amplitudes + field 2 lengths x 2 amplitudes) x 3 truth modes x groups
+    assert len(rows) == (2 + 2 * 2) * 3 * len(REPORT_GROUPS)
+    variants = json.loads((tmp_path / "out" / "protocol-fixture" / "variants.json").read_text())
+    lengths = {(v["spec"]["perturbation"], v["spec"]["corr_len_px"]) for v in variants.values()}
+    assert lengths == {("inverse_depth_bias", None), ("smooth_field", 8.0), ("smooth_field", 32.0)}
+
+
+@pytest.mark.parametrize("value", ["-8", "[]", "[8, 0]", '"x"'])
+def test_correlation_lengths_must_be_positive_numbers(tmp_path, value):
+    config, _ = _setup(tmp_path, f"\n[sensitivity]\ncorr_len_px = {value}\n")
+    with pytest.raises(ValueError, match="corr_len_px"):
+        load_protocol_config(config)

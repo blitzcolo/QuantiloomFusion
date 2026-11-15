@@ -9,6 +9,7 @@ from test_geometry_oracle import geometry, raycast
 from quantiloom_fusion.core.bands import BANDS, Band
 from quantiloom_fusion.evaluation.layer_report import (
     FOOTPRINT_DISTANCE_BINS_PX,
+    PARTITION_GROUPS,
     FusedView,
     combine_layers,
     layer_masks,
@@ -33,7 +34,7 @@ from quantiloom_fusion.evaluation.protocol import (
 from quantiloom_fusion.dataset import ThreeBandDataset
 from quantiloom_fusion.evaluation.scene import InputSpec, build_scene, load_scene
 from quantiloom_fusion.evaluation.source_ref import ms_ssim_fusion_n, qabf_n, scd_n
-from quantiloom_fusion.evaluation.truth_ref import TruthMode
+from quantiloom_fusion.evaluation.truth_ref import TruthMode, clean_input, truth_reference
 from quantiloom_fusion.fusion import Capabilities, FusionInput, FusionMethod, FusionOutput, create
 from quantiloom_fusion.signal.normalize import IrLinear, IrTemperature, VisDisplay, VisRawLinear
 
@@ -230,6 +231,35 @@ def test_layers_partition_and_occluded_layer_reports_deviation_from_reference_ba
     assert good["hp_sigma_px"] == 2.0
 
 
+def test_partition_groups_are_exclusive_and_cover_the_valid_grid():
+    scene = _scene()
+    masks = layer_masks(scene.layers)
+    parts = [masks[g] for g in PARTITION_GROUPS]
+    assert sum(p.astype(int) for p in parts).max() == 1
+    assert np.array_equal(np.logical_or.reduce(parts), scene.layers != int(Layer.INVALID))
+    assert np.array_equal(masks["occluded"] | masks["out_of_view"], masks["occluded_oov"])
+
+
+def test_truth_mse_decomposes_over_the_partition():
+    scene = _scene()
+    rows = evaluate_point(scene, create("max_abs"), scene.oracle_warps, TruthMode.FUSION)
+    by = {r["layer"]: r for r in rows}
+    parts = [by[g] for g in PARTITION_GROUPS if by[g]["n_pixels"]]
+    total_n = sum(r["n_pixels"] for r in parts)
+    weighted = sum(r["n_pixels"] * r["truth_MSE"] for r in parts) / total_n
+    masks = layer_masks(scene.layers)
+    valid = np.logical_or.reduce([masks[g] for g in PARTITION_GROUPS])
+    x = FusionInput(scene.reference, scene.images, scene.geometry, scene.oracle_warps)
+    fused = create("max_abs").fuse(x).image
+    reference, _ = truth_reference(TruthMode.FUSION, create("max_abs"),
+                                   clean_input(scene.clean, scene.geometry, scene.reference))
+    direct = float(np.mean((fused[valid].astype(np.float64) - reference[valid].astype(np.float64)) ** 2))
+    assert weighted == pytest.approx(direct, rel=1e-9)
+    for r in parts:
+        if r["truth_MSE"] > 0:
+            assert r["truth_PSNR"] == pytest.approx(10 * np.log10(1 / r["truth_MSE"]), abs=1e-9)
+
+
 _H, _W = 160, 240
 
 
@@ -291,7 +321,7 @@ def test_combined_layer_is_the_worst_over_sources():
 
 def test_rows_record_normalisation_calibration_and_context_prefix():
     rows = sensitivity_curve(_scene(), create("max_abs"), Sweep(PerturbationKind.SMOOTH_FIELD, [0.0, 1.0]))
-    assert {r["layer"] for r in rows} == {"correspondable", "edge", "occluded_oov"}
+    assert {r["layer"] for r in rows} == {"correspondable", "edge", "occluded", "out_of_view", "occluded_oov"}
     for r in rows:
         assert (r["norm_vis"], r["norm_ir"]) == ("vis_display", "ir_temperature")
         assert '"lo": 260.0' in r["norm_params"]

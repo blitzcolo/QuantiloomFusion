@@ -7,8 +7,8 @@ source corresponds there.  Reported groups:
 
 * ``correspondable`` and ``edge``: context (no-reference) metrics and the
   source-referenced metrics, each band counted only inside its own support.
-* ``occluded_oov`` (occluded + out_of_view): no source has information, so the
-  correct behaviour is to fall back to the reference band.  Source metrics are
+* ``occluded``, ``out_of_view`` and their union ``occluded_oov``: no source has
+  information, so the correct behaviour is to fall back to the reference band.  Source metrics are
   not defined there.  The score is the deviation from the reference band in
   the high-pass component (``hp_dev_*``), by distance to the source
   footprint: a multiresolution spline deliberately carries the low
@@ -21,6 +21,12 @@ source corresponds there.  Reported groups:
 
 No-reference metrics carry the ``ctx_`` prefix: they are context only and are
 never a dependent variable of registration sensitivity.
+
+The groups ``correspondable``, ``edge``, ``occluded`` and ``out_of_view`` are
+mutually exclusive and, with the invalid layer, cover the grid, so a
+truth-referenced MSE decomposes over them: MSE = sum_k a_k MSE_k with a_k the
+group's share of the valid pixels (``n_pixels``).  ``occluded_oov`` is kept as
+a reporting group for continuity; it is not part of that partition.
 """
 
 from __future__ import annotations
@@ -40,8 +46,14 @@ from .source_ref import ms_ssim_fusion_n, qabf_n, scd_n
 LAYER_GROUPS: dict[str, tuple[Layer, ...]] = {
     "correspondable": (Layer.CORRESPONDABLE,),
     "edge": (Layer.EDGE,),
+    "occluded": (Layer.OCCLUDED,),
+    "out_of_view": (Layer.OUT_OF_VIEW,),
     "occluded_oov": (Layer.OCCLUDED, Layer.OUT_OF_VIEW),
 }
+# Groups where no source band has information: source-referenced metrics are undefined.
+NO_SOURCE_GROUPS = frozenset({"occluded", "out_of_view", "occluded_oov"})
+# The mutually exclusive groups a truth MSE decomposes over (with the invalid layer excluded).
+PARTITION_GROUPS = ("correspondable", "edge", "occluded", "out_of_view")
 SOURCE_METRIC_KEYS = ("SCD", "Qabf", "MS_SSIM")
 MS_SSIM_MARGIN_PX = 32
 HP_SIGMA_PX = 2.0
@@ -144,10 +156,10 @@ def reference_deviation(view: FusedView, mask: np.ndarray, hp_sigma_px: float = 
 
 
 def layer_metrics(view: FusedView, group: str, mask: np.ndarray) -> dict[str, float]:
-    """All metrics of one layer group; source metrics are NaN in ``occluded_oov``."""
+    """All metrics of one layer group; source metrics are NaN in the groups without source information."""
     row = {"layer": group, "n_pixels": int(mask.sum()), "layer_fraction": float(mask.mean())}
     row |= context_metrics(view, mask) if mask.any() else {
         k: _NAN for k in ("ctx_EN", "ctx_SD", "ctx_SF", "ctx_AG")}
-    row |= (dict.fromkeys(SOURCE_METRIC_KEYS, _NAN) if group == "occluded_oov"
+    row |= (dict.fromkeys(SOURCE_METRIC_KEYS, _NAN) if group in NO_SOURCE_GROUPS
             else source_ref_metrics(view, mask))
     return row | reference_deviation(view, mask)

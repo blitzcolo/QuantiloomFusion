@@ -81,10 +81,15 @@ def _ssim_map(img: np.ndarray, ref: np.ndarray) -> np.ndarray:
 
 
 def truth_metrics(fused: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> dict[str, float]:
-    """PSNR / SSIM of the fused luminance against the truth reference on ``mask``."""
+    """MSE / PSNR / SSIM of the fused luminance against the truth reference on ``mask``.
+
+    ``truth_MSE`` is uncapped (PSNR saturates at its ceiling), so per-layer values
+    weighted by pixel counts sum to the MSE over their union.
+    """
     if not mask.any():
-        return {"truth_PSNR": float("nan"), "truth_SSIM": float("nan")}
-    return {"truth_PSNR": psnr(fused[mask], reference[mask]),
+        return {"truth_MSE": float("nan"), "truth_PSNR": float("nan"), "truth_SSIM": float("nan")}
+    diff = fused[mask].astype(np.float64) - reference[mask].astype(np.float64)
+    return {"truth_MSE": float(np.mean(diff**2)), "truth_PSNR": psnr(fused[mask], reference[mask]),
             "truth_SSIM": float(_ssim_map(fused, reference)[mask].mean())}
 
 

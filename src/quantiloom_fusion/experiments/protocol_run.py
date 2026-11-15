@@ -54,7 +54,7 @@ from ..dataset.reader import ThreeBandDataset
 from ..evaluation.base import ResultKey, ResultStore
 from ..evaluation.complementarity import AnalysisSettings, analyse_dataset
 from ..evaluation.complementarity_report import render_markdown
-from ..evaluation.layer_report import LAYER_GROUPS
+from ..evaluation.layer_report import REPORT_GROUPS
 from ..evaluation.protocol import (
     PerturbationKind,
     Sweep,
@@ -343,7 +343,7 @@ def _layer_metric(group: str) -> str:
     return f"layer_{group}"
 
 
-_GROUPS = tuple(LAYER_GROUPS)
+_GROUPS = REPORT_GROUPS
 
 
 class _Run:

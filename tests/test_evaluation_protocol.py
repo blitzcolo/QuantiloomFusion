@@ -9,7 +9,9 @@ from test_geometry_oracle import geometry, raycast
 from quantiloom_fusion.core.bands import BANDS, Band
 from quantiloom_fusion.evaluation.layer_report import (
     FOOTPRINT_DISTANCE_BINS_PX,
+    CORE_MARGIN_PX,
     PARTITION_GROUPS,
+    REPORT_GROUPS,
     FusedView,
     combine_layers,
     layer_masks,
@@ -240,6 +242,23 @@ def test_partition_groups_are_exclusive_and_cover_the_valid_grid():
     assert np.array_equal(masks["occluded"] | masks["out_of_view"], masks["occluded_oov"])
 
 
+def test_correspondable_core_keeps_the_margin_from_other_layers():
+    layers = np.full((120, 200), int(Layer.CORRESPONDABLE), np.int8)
+    layers[:, :20] = int(Layer.OUT_OF_VIEW)
+    layers[60, 150] = int(Layer.EDGE)
+    layers[:10, :] = int(Layer.INVALID)  # neither a boundary nor counted
+    masks = layer_masks(layers)
+    core, corr = masks["correspondable_core"], masks["correspondable"]
+    assert core.any() and not (core & ~corr).any()
+    boundary = np.isin(layers, [int(Layer.EDGE), int(Layer.OCCLUDED), int(Layer.OUT_OF_VIEW)])
+    dist = ndimage.distance_transform_edt(~boundary)
+    assert dist[core].min() > CORE_MARGIN_PX
+    assert np.array_equal(core, corr & (dist > CORE_MARGIN_PX))
+    assert core[0:10].sum() == 0 and core[10:20, 100].all()  # invalid rows excluded, not a boundary
+    only = np.full((40, 40), int(Layer.CORRESPONDABLE), np.int8)
+    assert np.array_equal(layer_masks(only)["correspondable_core"], layer_masks(only)["correspondable"])
+
+
 def test_truth_mse_decomposes_over_the_partition():
     scene = _scene()
     rows = evaluate_point(scene, create("max_abs"), scene.oracle_warps, TruthMode.FUSION)
@@ -321,7 +340,7 @@ def test_combined_layer_is_the_worst_over_sources():
 
 def test_rows_record_normalisation_calibration_and_context_prefix():
     rows = sensitivity_curve(_scene(), create("max_abs"), Sweep(PerturbationKind.SMOOTH_FIELD, [0.0, 1.0]))
-    assert {r["layer"] for r in rows} == {"correspondable", "edge", "occluded", "out_of_view", "occluded_oov"}
+    assert {r["layer"] for r in rows} == set(REPORT_GROUPS)
     for r in rows:
         assert (r["norm_vis"], r["norm_ir"]) == ("vis_display", "ir_temperature")
         assert '"lo": 260.0' in r["norm_params"]

@@ -54,6 +54,12 @@ LAYER_GROUPS: dict[str, tuple[Layer, ...]] = {
 NO_SOURCE_GROUPS = frozenset({"occluded", "out_of_view", "occluded_oov"})
 # The mutually exclusive groups a truth MSE decomposes over (with the invalid layer excluded).
 PARTITION_GROUPS = ("correspondable", "edge", "occluded", "out_of_view")
+# Correspondable pixels farther than this from every edge / occluded / out-of-view pixel. A
+# multiresolution pyramid mixes content across a layer boundary over roughly its coarsest
+# support (about 32 px at 4 levels), so near a boundary the correspondable score also carries
+# the neighbouring layer; the core group compares registrations away from that influence.
+CORE_MARGIN_PX = 32.0
+REPORT_GROUPS = (*LAYER_GROUPS, "correspondable_core")
 SOURCE_METRIC_KEYS = ("SCD", "Qabf", "MS_SSIM")
 MS_SSIM_MARGIN_PX = 32
 HP_SIGMA_PX = 2.0
@@ -78,9 +84,22 @@ def combine_layers(maps: Sequence[np.ndarray]) -> np.ndarray:
     return np.minimum.reduce(list(maps))
 
 
-def layer_masks(layers: np.ndarray) -> dict[str, np.ndarray]:
-    return {name: np.isin(layers, [int(layer) for layer in members])
-            for name, members in LAYER_GROUPS.items()}
+def layer_masks(layers: np.ndarray, core_margin_px: float = CORE_MARGIN_PX) -> dict[str, np.ndarray]:
+    """Masks of every reporting group, ``REPORT_GROUPS`` order.
+
+    ``correspondable_core``: correspondable pixels whose Euclidean distance to the nearest edge,
+    occluded or out-of-view pixel exceeds ``core_margin_px`` (invalid pixels and the image border
+    do not count as boundaries).  A supplementary statistic, not part of ``PARTITION_GROUPS``.
+    """
+    masks = {name: np.isin(layers, [int(layer) for layer in members])
+             for name, members in LAYER_GROUPS.items()}
+    boundary = np.isin(layers, [int(Layer.EDGE), int(Layer.OCCLUDED), int(Layer.OUT_OF_VIEW)])
+    corr = masks["correspondable"]
+    if boundary.any():
+        masks["correspondable_core"] = corr & (ndimage.distance_transform_edt(~boundary) > core_margin_px)
+    else:
+        masks["correspondable_core"] = corr.copy()
+    return masks
 
 
 def context_metrics(view: FusedView, mask: np.ndarray) -> dict[str, float]:

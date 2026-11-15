@@ -103,3 +103,22 @@ def test_correlation_lengths_must_be_positive_numbers(tmp_path, value):
     config, _ = _setup(tmp_path, f"\n[sensitivity]\ncorr_len_px = {value}\n")
     with pytest.raises(ValueError, match="corr_len_px"):
         load_protocol_config(config)
+
+
+def test_hypothesis_count_reaches_the_sweep_parameters(tmp_path):
+    config, out = _setup(tmp_path, 'n_hypotheses = 40\nz_min_m = 1.5\n')
+    text = config.read_text(encoding="utf-8").replace('registration = ["oracle", "infinity_homography"]',
+                                                      'registration = ["oracle", "epipolar_sweep"]')
+    config.write_text(text, encoding="utf-8")
+    cfg = load_protocol_config(config)
+    params = cfg.sweep_params("grad_ncc")
+    assert (params.n_hypotheses, params.z_min_m) == (40, 1.5)
+    assert load_protocol_config(_setup(tmp_path / "default")[0]).sweep_params("grad_ncc").n_hypotheses == 16
+    # (The fixture rig has a zero baseline, so the sweep itself is not run here.)
+
+
+@pytest.mark.parametrize("value", ["1", "2.5", "true"])
+def test_hypothesis_count_must_be_an_integer_of_at_least_two(tmp_path, value):
+    config, _ = _setup(tmp_path, f"n_hypotheses = {value}\n")
+    with pytest.raises(ValueError, match="n_hypotheses"):
+        load_protocol_config(config)

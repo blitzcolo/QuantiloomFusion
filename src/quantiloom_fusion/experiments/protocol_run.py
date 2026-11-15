@@ -89,7 +89,7 @@ OPERATORS = ("laplacian_pyramid_masked", "noise_aware_pyramid")
 PROTOCOL_VERSION = 1
 
 _TOP = {"name", "dataset", "bands", "vis_input", "ir_input", "items", "registration", "operators",
-        "levels", "kappa", "fpn", "similarity", "z_min_m", "sensitivity", "registration_study",
+        "levels", "kappa", "fpn", "similarity", "z_min_m", "n_hypotheses", "sensitivity", "registration_study",
         "complementarity"}
 _SENS = {"bias", "field", "corr_len_px", "seed", "inflation"}
 _STUDY = {"similarities", "free_steps"}
@@ -126,6 +126,7 @@ class ProtocolConfig:
     fpn: bool = True
     similarity: str = "grad_ncc"
     z_min_m: float = 3.0
+    n_hypotheses: int = 16
     sensitivity: SensitivitySpec = field(default_factory=SensitivitySpec)
     registration_study: StudySpec = field(default_factory=StudySpec)
     view_group_blocks: int | None = None
@@ -133,6 +134,12 @@ class ProtocolConfig:
     @property
     def reference(self) -> Band:
         return self.bands[0]
+
+    def sweep_params(self, similarity: str) -> SweepParams:
+        """Epipolar sweep / free-search parameters: the inverse-depth range [0, 1/z_min_m] split into
+        ``n_hypotheses``; a longer baseline or a nearer z_min needs more hypotheses to keep the
+        per-hypothesis displacement step (f * b / z_min / (n - 1)) at a fraction of a pixel."""
+        return SweepParams(similarity=Similarity(similarity), z_min_m=self.z_min_m, n_hypotheses=self.n_hypotheses)
 
 
 def _bad(key: str, msg: str) -> ValueError:
@@ -201,6 +208,9 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
     for key, v in (("kappa", kappa), ("z_min_m", z_min)):
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
             raise _bad(key, f"expected a positive number, got {v!r}")
+    n_hyp = data.get("n_hypotheses", 16)
+    if type(n_hyp) is not int or n_hyp < 2:
+        raise _bad("n_hypotheses", f"expected an integer >= 2, got {n_hyp!r}")
     if type(data.get("fpn", True)) is not bool:
         raise _bad("fpn", "expected true or false")
     blocks = comp.get("view_group_blocks")
@@ -210,7 +220,7 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
         name=data["name"], dataset=data["dataset"], bands=bands, vis_input=vis_input, ir_input=ir_input,
         items=_choices(data, "items", ITEMS), registration=_choices(data, "registration", REGISTRATIONS),
         operators=_choices(data, "operators", OPERATORS), levels=levels, kappa=float(kappa),
-        fpn=data.get("fpn", True), similarity=similarity, z_min_m=float(z_min),
+        fpn=data.get("fpn", True), similarity=similarity, z_min_m=float(z_min), n_hypotheses=n_hyp,
         sensitivity=SensitivitySpec(
             bias=_numbers(sens.get("bias", list(SensitivitySpec.bias)), "sensitivity.bias"),
             field=_numbers(sens.get("field", list(SensitivitySpec.field)), "sensitivity.field"),
@@ -264,8 +274,7 @@ class _Sample:
                 self._warps[registration] = dict(self.scene.oracle_warps)
             else:
                 reg = {"infinity_homography": InfinityHomographyRegistrar(), "resize": ResizeRegistrar(),
-                       "epipolar_sweep": EpipolarSweepRegistrar(SweepParams(
-                           similarity=Similarity(self.cfg.similarity), z_min_m=self.cfg.z_min_m))}[registration]
+                       "epipolar_sweep": EpipolarSweepRegistrar(self.cfg.sweep_params(self.cfg.similarity))}[registration]
                 obs = self.sample.observations
                 self._warps[registration] = {
                     b: reg.estimate(obs[ref], obs[b], self.reg_input(ref), self.reg_input(b)) for b in sources}
@@ -380,7 +389,8 @@ class _Run:
                     yield reg, op, mode, _base_spec(self.cfg) | {
                         "item": "matrix", "registration": reg, "truth_mode": mode.value if mode else "none",
                         "similarity": self.cfg.similarity if reg == "epipolar_sweep" else "",
-                    } | _operator_spec(self.cfg, op)
+                    } | ({"z_min_m": self.cfg.z_min_m, "n_hypotheses": self.cfg.n_hypotheses}
+                         if reg == "epipolar_sweep" else {}) | _operator_spec(self.cfg, op)
 
     def matrix(self, sample: _Sample) -> None:
         todo = [s for s in self.matrix_specs(sample) if self.pending(sample.sid, s[3], map(_layer_metric, _GROUPS))]
@@ -429,7 +439,7 @@ class _Run:
     def study_methods(self):
         yield "infinity_homography", "", None, lambda: InfinityHomographyRegistrar()
         for sim in self.cfg.registration_study.similarities:
-            p = SweepParams(similarity=Similarity(sim), z_min_m=self.cfg.z_min_m)
+            p = self.cfg.sweep_params(sim)
             yield "epipolar_sweep", sim, None, lambda p=p: EpipolarSweepRegistrar(p)
             for step in self.cfg.registration_study.free_steps:
                 yield "free_search", sim, step, lambda p=p, step=step: FreeSearchRegistrar(p, step_px=step)
@@ -440,7 +450,7 @@ class _Run:
             for method, sim, step, make in self.study_methods():
                 spec = _base_spec(self.cfg) | {"item": "registration_study", "band": str(band), "method": method,
                                                "similarity": sim, "free_step": "" if step is None else step,
-                                               "z_min_m": self.cfg.z_min_m}
+                                               "z_min_m": self.cfg.z_min_m, "n_hypotheses": self.cfg.n_hypotheses}
                 if not self.pending(sample.sid, spec, ["epe"]):
                     continue
                 obs = sample.sample.observations

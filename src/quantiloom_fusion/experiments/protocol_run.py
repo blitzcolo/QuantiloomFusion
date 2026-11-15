@@ -198,9 +198,10 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
     _check(study, _STUDY, "registration_study.")
     _check(comp, _COMP, "complementarity.")
     steps = study.get("free_steps", list(StudySpec.free_steps))
-    if not isinstance(steps, list) or not steps or any(
+    if not isinstance(steps, list) or any(
             not (s == "sweep" or (isinstance(s, (int, float)) and not isinstance(s, bool) and s > 0)) for s in steps):
-        raise _bad("registration_study.free_steps", f'expected positive numbers or "sweep", got {steps!r}')
+        raise _bad("registration_study.free_steps", f'expected a list of positive numbers or "sweep" (empty: no '
+                   f'free-search control), got {steps!r}')
     similarity = data.get("similarity", "grad_ncc")
     if similarity not in tuple(str(s) for s in Similarity):
         raise _bad("similarity", f"{similarity!r} not one of {[str(s) for s in Similarity]}")

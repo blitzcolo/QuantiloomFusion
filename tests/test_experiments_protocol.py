@@ -145,3 +145,12 @@ def test_sensitivity_operators_must_be_configured_operators(tmp_path):
     config, _ = _setup(tmp_path, '\n[sensitivity]\noperators = ["noise_aware_pyramid"]\n')
     with pytest.raises(ValueError, match="operators"):
         load_protocol_config(config)
+
+
+def test_an_empty_free_step_list_skips_the_free_search_control(tmp_path):
+    config, _ = _setup(tmp_path, '\n[registration_study]\nsimilarities = ["grad_ncc"]\nfree_steps = []\n')
+    from quantiloom_fusion.experiments.protocol_run import _Run
+    cfg = load_protocol_config(config)
+    assert cfg.registration_study.free_steps == ()
+    methods = [m for m, *_ in _Run.study_methods(type("R", (), {"cfg": cfg})())]
+    assert "free_search" not in methods and "epipolar_sweep" in methods

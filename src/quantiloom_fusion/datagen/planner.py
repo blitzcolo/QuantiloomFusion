@@ -54,12 +54,13 @@ def plan(config: Path,out: Path,renderer=None):
     qt=native_path(d["qt_root"]).resolve();cli=native_path(d["cli"]).resolve()
     if not cli.is_file():raise FileNotFoundError(f"CLI not found: {cli}")
     cli_root=next((p for p in cli.parents if (p/'assets').is_dir() and (p/'src').is_dir()),cli.parent)
-    # The renderer's identity gates by more than its version string: the
-    # executable's content hash and the digest of the shader set it loads
-    # (share/quantiloom/shaders/spirv/SHADERSET beside an installed SDK). With
-    # no source tree next to an installed CLI, physics_sources is empty, so a
-    # same-version rebuild would otherwise pass as the same renderer. The
-    # remaining binaries beside it are observed for provenance only.
+    # The renderer's identity beyond its version string -- the executable's
+    # content hash and the digest of the shader set it loads
+    # (share/quantiloom/shaders/spirv/SHADERSET beside an installed SDK) -- is
+    # recorded for provenance but does not gate: the renderer is rebuilt too
+    # often for every rebuild to strand a half-rendered dataset. A run that must
+    # not mix builds points dataset.cli at a frozen copy of the SDK instead.
+    # The remaining binaries beside it are observed for provenance only.
     shaderset=cli.parent.parent/'share'/'quantiloom'/'shaders'/'spirv'/'SHADERSET'
     renderer_identity={'cli_sha256':digest(cli),
         'shaderset':shaderset.read_text(encoding='utf-8').strip() if shaderset.is_file() else None,
@@ -242,11 +243,12 @@ def plan(config: Path,out: Path,renderer=None):
             print(f'WARNING: assets not reachable by the Windows CLI: {unreachable}',flush=True)
     version=(renderer or QuantiloomCli(cli)).version()
     files=generator_files()
-    recipe={'settings':settings,'sources':closure,'cli_version':version,'renderer':renderer_identity,'generator_sha256':generator_fingerprint(files),'generator_files':files,
+    recipe={'settings':settings,'sources':closure,'cli_version':version,'generator_sha256':generator_fingerprint(files),'generator_files':files,
             'physics_sources':physics_sources,
             'derived_assets':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in derived.items()}}
     identity=fingerprint(recipe)
-    result={'schema':SCHEMA,'schema_version':VERSION,'dataset_id':identity,'name':d['name'],'recipe':recipe,'renderer_observed':observed,
+    result={'schema':SCHEMA,'schema_version':VERSION,'dataset_id':identity,'name':d['name'],'recipe':recipe,
+            'renderer_identity':renderer_identity,'renderer_observed':observed,
             'scenes':scene_info,'samples':samples,
             'registration':'unregistered_native_camera_grids','geometry_ground_truth':d['geometry_truth'],
             'fixed_camera_profiles':settings['cameras'],'parameters_vary':'scene, rig azimuth/elevation/radius, repeat; each parameter tuple includes all three bands'}
@@ -254,18 +256,21 @@ def plan(config: Path,out: Path,renderer=None):
     references=sum(len(s.get('references',{})) for s in samples)
     extra=f' (+{references} reference renders)' if references else ''
     stored=load_json(destination) if destination.exists() else None
-    if stored is not None and stored['dataset_id']!=identity and stored['recipe'].get('renderer')!=renderer_identity:
-        raise ValueError(f'existing dataset was planned with a different renderer executable or shader set '
-                         f'({stored["recipe"].get("renderer")} vs {renderer_identity}); choose a new output directory')
     if stored is not None and stored['dataset_id']!=identity:
         raise ValueError('existing dataset has a different recipe, source asset, CLI version or generator fingerprint; choose a new output directory')
     if stored is not None:
         # Trig results differ in the last ULP between Windows and Linux libm,
         # so the first planning host freezes the plan: a tolerant re-plan keeps
         # the stored job files and plan rather than churning their hashes.
-        # renderer_observed is recorded but not gated: compiled blobs churn.
-        diff=_agrees({k:v for k,v in stored.items() if k!='renderer_observed'},
-                     {k:v for k,v in result.items() if k!='renderer_observed'})
+        # renderer_identity and renderer_observed are recorded but not gated:
+        # the renderer is rebuilt often and compiled blobs churn. The stored
+        # values stay those of the first planning run; a change is reported.
+        ungated=('renderer_identity','renderer_observed')
+        if stored.get('renderer_identity')!=renderer_identity:
+            print(f"WARNING: renderer executable or shader set differs from the one recorded at planning "
+                  f"({stored.get('renderer_identity')} vs {renderer_identity}); continuing, not gated",flush=True)
+        diff=_agrees({k:v for k,v in stored.items() if k not in ungated},
+                     {k:v for k,v in result.items() if k not in ungated})
         if diff:raise ValueError(f'planned file changed: {destination}: {diff}')
         expected={c['job']:c['job_sha256'] for s in stored['samples'] for c in [*s['cameras'].values(),*s.get('references',{}).values()]}
         for relative,text in {**derived,**texts}.items():

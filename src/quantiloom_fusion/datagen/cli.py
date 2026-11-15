@@ -6,10 +6,10 @@ No renderer/SDK imports. Optional pixel QA uses NumPy and OpenEXR.
 Runs under Windows Python or a WSL2 Linux Python. The renderer is always the
 Windows CLI; on WSL it is invoked via interop, so the dataset must live on a
 Windows-accessible drive (under /mnt/<drive>/). Recipe identity is gated by the
-CLI `--version` string, the CLI executable's hash and its shader set digest
-(SHADERSET), plus content hashes of the scene assets, settings and the
-generator's package import closure; the other renderer binaries are recorded
-for provenance but do not gate.
+CLI `--version` string plus content hashes of the scene assets, settings and the
+generator's package import closure; the CLI executable's hash, its shader set
+digest (SHADERSET) and the other renderer binaries are recorded for provenance
+but do not gate.
 """
 
 import argparse

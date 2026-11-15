@@ -584,3 +584,14 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 | 平台 | Windows 原生（MSVC），SDK 另有 linux_amd64；WSL2 经 interop 驱动 | 双系统交替使用 |
 | GPU | 需 Vulkan RT（NVIDIA RTX）；无 GPU 时渲染类 gate 跳过 | 必需 |
 | USD | 可选 OpenUSD 场景加载 | 未用（glTF 场景） |
+
+
+### 追加模型（`extra_models` / `extra_materials`，2026-11-15）
+
+`[[scenes]]` 条目可选两个键，**追加**到场景里，不替换（与 `overrides` 整段替换不同）：
+
+- `extra_models`：`[[models]]` 表的列表（`file`、`name` 必填，可选 `translation`、`rotation_euler_degrees`、`scale`，禁止 `motion`），渲染器把它们与 `scene.gltf` 一起加载。模型文件及其 buffer/图像进入配方的资产哈希。
+- `extra_materials`：`[[materials]]` 表的列表，给追加模型的材质名定光谱绑定与热物性；与场景已有材质同名会被拒绝。追加模型的材质名与主 glTF 的材质名冲突也会被拒绝（绑定会有歧义）。
+- 没有这两个键的配置，生成的任务文件与此前逐字节相同（`build/_parity/20261115-q5-smoke`，与 `ch6-smoke-0.10.0-r2` 的 72 个任务在输出目录归一化后无差异）。
+
+用途：第 6 章扩展基线实验（E1）在参考视角前方 2–5 m 放近景遮挡物。

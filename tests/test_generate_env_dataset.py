@@ -243,6 +243,46 @@ class PlanningContracts(unittest.TestCase):
         self.assertIn('not gated',out.getvalue())
         self.assertEqual(jsonio.load_json(self.out/'dataset.plan.json')['renderer_identity'],recorded)
 
+    def _extra_model(self, material='Post'):
+        model=self.root/'post.gltf'
+        model.write_text(json.dumps({'asset':{'version':'2.0'},'materials':[{'name':material}]}))
+        return model
+
+    def test_extra_models_and_materials_are_appended_to_every_job(self):
+        model=self._extra_model()
+        base=self.plan()
+        self.settings['scenes'][0].update(
+            extra_models=[{'file':model.as_posix(),'name':'post_a','translation':[1.0,0.0,2.0],'scale':[0.1,2.0,0.1]}],
+            extra_materials=[{'name':'Post','ir_emissivity':0.93}])
+        self.save();out=self.out;self.out=self.root/'dataset_extra'
+        extra=self.plan()
+        self.assertNotEqual(base['dataset_id'],extra['dataset_id'])  # the scene changed, so the recipe did
+        self.assertIn(paths.canonical_path(model),{e['path'] for e in extra['recipe']['sources']})
+        camera=extra['samples'][0]['cameras']['lwir']
+        job=tomllib.loads((self.out/camera['job']).read_text())
+        self.assertEqual([(m['name'],m['translation'],m['scale']) for m in job['models']],
+                         [('post_a',[1.0,0.0,2.0],[0.1,2.0,0.1])])
+        self.assertEqual(job['models'][0]['file'],paths.canonical_path(model))
+        names={m['name'] for m in job['materials']}
+        self.assertTrue({'Object','Post'} <= names)
+        self.out=out
+
+    def test_extra_materials_must_not_redefine_scene_materials(self):
+        self.settings['scenes'][0]['extra_materials']=[{'name':'Object','ir_emissivity':0.5}];self.save()
+        with self.assertRaisesRegex(ValueError,'already defined'):self.plan()
+
+    def test_extra_model_materials_must_not_collide_with_the_main_gltf(self):
+        model=self._extra_model('Object')
+        self.settings['scenes'][0]['extra_models']=[{'file':model.as_posix(),'name':'clash'}];self.save()
+        with self.assertRaisesRegex(ValueError,'collides'):self.plan()
+
+    def test_extra_models_are_validated(self):
+        for bad,msg in (([{'name':'x'}],'needs'),([{'file':'a.gltf','name':'x','motion':{}}],'motion'),
+                        ([{'file':'a.gltf','name':'x','translation':[1,2]}],'three'),
+                        ([{'file':'a.gltf','name':'x'},{'file':'b.gltf','name':'x'}],'duplicate')):
+            self.settings['scenes'][0]['extra_models']=bad;self.save()
+            with self.assertRaisesRegex(ValueError,msg):settings.read_settings(self.config)
+
     def test_physics_source_change_rejected_within_same_cli_version(self):
         # A same-version rebuild that edits physics-relevant sources must not
         # resume a dataset: that is exactly the pre/post-fix mixing the

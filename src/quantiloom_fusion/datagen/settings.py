@@ -122,7 +122,21 @@ def read_settings(path):
             if missing:raise ValueError(f"reference_subset.{key} values {missing} are not in sampling.{key} {s[key]}")
     names=[]
     for scene in doc["scenes"]:
-        check_keys(scene,{"id","config","target","radius_m","overrides","solar_scale","vis_exposure_s"},"scene")
+        check_keys(scene,{"id","config","target","radius_m","overrides","solar_scale","vis_exposure_s",
+                          "extra_models","extra_materials"},"scene")
+        for key,required in (("extra_models",("file","name")),("extra_materials",("name",))):
+            entries=scene.get(key,[])
+            if not isinstance(entries,list) or any(not isinstance(e,dict) for e in entries):
+                raise ValueError(f"scene {scene.get('id')}: {key} must be a list of tables")
+            for e in entries:
+                missing=[k for k in required if not isinstance(e.get(k),str) or not e[k]]
+                if missing:raise ValueError(f"scene {scene.get('id')}: {key} entry needs {missing}")
+            names_=[e["name"] for e in entries]
+            if len(names_)!=len(set(names_)):raise ValueError(f"scene {scene.get('id')}: duplicate {key} names")
+        for m in scene.get("extra_models",[]):
+            if "motion" in m:raise ValueError("model motion is forbidden, including nested motion tables")
+            for k in ("translation","rotation_euler_degrees","scale"):
+                if k in m:vector(m[k],f"extra_models.{k}")
         if not re.fullmatch(r"[a-zA-Z0-9_-]+",scene["id"]):raise ValueError("unsafe scene id")
         if "overrides" in scene and not isinstance(scene["overrides"],dict):
             raise ValueError("scene overrides must be a table of named sections to replace")

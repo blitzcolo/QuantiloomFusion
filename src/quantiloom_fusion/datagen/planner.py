@@ -1,6 +1,7 @@
 """Dataset planning: recipe closure, sampling grid and job TOMLs."""
 
 import hashlib
+import json
 import math
 import tomllib
 from itertools import product
@@ -85,6 +86,16 @@ def plan(config: Path,out: Path,renderer=None):
         # Scene overrides replace whole named sections (write the complete
         # [lighting]/[thermal]/... table in the settings, not a patch of it).
         for key,value in definition.get("overrides",{}).items():base[key]=value
+        # Extra models and their material entries are appended, not replaced: they add objects
+        # (e.g. near-field occluders for a baseline study) to an otherwise unchanged scene.
+        extra_materials=definition.get("extra_materials",[])
+        if extra_materials:
+            existing={m.get("name") for m in base.get("materials",[])}
+            clash=sorted(m["name"] for m in extra_materials if m["name"] in existing)
+            if clash:raise ValueError(f'scene {definition["id"]}: extra_materials already defined by the scene: {clash}')
+            base.setdefault("materials",[]).extend(json.loads(json.dumps(extra_materials)))
+        if definition.get("extra_models"):
+            base.setdefault("models",[]).extend(json.loads(json.dumps(definition["extra_models"])))
         reject_motion(base)
         if d["thermal_mode"]=="solved" and not base.get("thermal",{}).get("enabled"):
             raise ValueError(f'thermal_mode="solved" but {definition["id"]} has no enabled [thermal] section')
@@ -100,6 +111,19 @@ def plan(config: Path,out: Path,renderer=None):
         target=definition.get('target',base['camera']['look_at'])
         radius=definition.get('radius_m',norm(add(base['camera']['position'],scale(target,-1)))*ws)
         materials=[m for m in gltf.get('materials',[]) if m.get('name')]
+        main_names={m['name'] for m in materials}
+        for entry in base.get('models',[]):
+            extra=native_path(entry['file']);extra_doc=read_gltf(extra);assets.add(extra)
+            for collection in ('buffers','images'):
+                for resource in extra_doc.get(collection,[]):
+                    uri=resource.get('uri','')
+                    if uri and not uri.startswith('data:'):assets.add(resolve_asset(uri,extra.parent,qt,cli_root))
+            for m in extra_doc.get('materials',[]):
+                if not m.get('name'):continue
+                if m['name'] in main_names:
+                    raise ValueError(f'scene {definition["id"]}: model {entry["name"]} material {m["name"]!r} '
+                                     f'collides with a material of the main glTF')
+                if m['name'] not in {x['name'] for x in materials}:materials.append(m)
         solar=None
         solar_scale=definition.get('solar_scale',1.0)
         if not isinstance(solar_scale,(int,float)) or isinstance(solar_scale,bool) or not math.isfinite(solar_scale) or solar_scale<=0:

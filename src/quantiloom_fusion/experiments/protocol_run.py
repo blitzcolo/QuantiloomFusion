@@ -91,7 +91,7 @@ PROTOCOL_VERSION = 1
 _TOP = {"name", "dataset", "bands", "vis_input", "ir_input", "items", "registration", "operators",
         "levels", "kappa", "fpn", "similarity", "z_min_m", "n_hypotheses", "sensitivity", "registration_study",
         "complementarity"}
-_SENS = {"bias", "field", "corr_len_px", "seed", "inflation"}
+_SENS = {"bias", "field", "corr_len_px", "seed", "inflation", "operators", "truth_modes"}
 _STUDY = {"similarities", "free_steps"}
 _COMP = {"view_group_blocks"}
 
@@ -103,6 +103,8 @@ class SensitivitySpec:
     corr_len_px: tuple[float, ...] = (8.0,)  # smooth-field correlation lengths; one sweep each
     seed: int = 0
     inflation: bool = True
+    operators: tuple[str, ...] | None = None  # subset of the config's operators; None = all
+    truth_modes: tuple[str, ...] | None = None  # subset of TruthMode values; None = all
 
 
 @dataclass(frozen=True)
@@ -225,7 +227,11 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
             bias=_numbers(sens.get("bias", list(SensitivitySpec.bias)), "sensitivity.bias"),
             field=_numbers(sens.get("field", list(SensitivitySpec.field)), "sensitivity.field"),
             corr_len_px=_corr_lengths(sens.get("corr_len_px", 8.0)), seed=int(sens.get("seed", 0)),
-            inflation=bool(sens.get("inflation", True))),
+            inflation=bool(sens.get("inflation", True)),
+            operators=_choices(sens, "operators", tuple(data.get("operators") or ()))
+            if "operators" in sens else None,
+            truth_modes=_choices(sens, "truth_modes", tuple(str(m) for m in TruthMode))
+            if "truth_modes" in sens else None),
         registration_study=StudySpec(
             similarities=_choices(study, "similarities", tuple(str(s) for s in Similarity))
             if "similarities" in study else StudySpec.similarities,
@@ -410,10 +416,11 @@ class _Run:
         # one sweep per configured correlation length.
         sweeps = [(PerturbationKind.INVERSE_DEPTH_BIAS, s.bias, None),
                   *((PerturbationKind.SMOOTH_FIELD, s.field, c) for c in s.corr_len_px)]
-        for op in self.cfg.operators:
+        modes = [m for m in TruthMode if s.truth_modes is None or str(m) in s.truth_modes]
+        for op in (s.operators or self.cfg.operators):
             for kind, amps, corr in sweeps:
                 corr_arg = s.corr_len_px[0] if corr is None else corr  # unused by the bias sweep
-                for mode in TruthMode:
+                for mode in modes:
                     specs = {a: _base_spec(self.cfg) | {"item": "sensitivity", "perturbation": kind.value,
                                                          "amplitude": a, "truth_mode": mode.value,
                                                          "corr_len_px": corr, "seed": s.seed}

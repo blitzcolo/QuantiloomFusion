@@ -122,3 +122,26 @@ def test_hypothesis_count_must_be_an_integer_of_at_least_two(tmp_path, value):
     config, _ = _setup(tmp_path, f"n_hypotheses = {value}\n")
     with pytest.raises(ValueError, match="n_hypotheses"):
         load_protocol_config(config)
+
+
+def test_sensitivity_can_be_restricted_to_operators_and_truth_modes(tmp_path):
+    root = build_fixture(tmp_path / "ds", samples=1, size=(32, 24), references=True)
+    config = tmp_path / "protocol.toml"
+    text = (CONFIG.format(dataset=root.as_posix()).replace('items = ["matrix"]', 'items = ["sensitivity"]')
+            .replace('operators = ["laplacian_pyramid_masked"]', 'operators = ["laplacian_pyramid_masked", "noise_aware_pyramid"]'))
+    config.write_text(text + '\n[sensitivity]\nbias = [0.0, 0.01]\nfield = [0.0]\ninflation = false\n'
+                      'operators = ["laplacian_pyramid_masked"]\ntruth_modes = ["registration_method"]\n',
+                      encoding="utf-8")
+    cfg = load_protocol_config(config)
+    assert cfg.sensitivity.operators == ("laplacian_pyramid_masked",)
+    assert run_protocol(config, out_root=tmp_path / "out") == 0
+    variants = json.loads((tmp_path / "out" / "protocol-fixture" / "variants.json").read_text())
+    specs = [v["spec"] for v in variants.values()]
+    assert {s["operator"] for s in specs} == {"laplacian_pyramid_masked"}
+    assert {s["truth_mode"] for s in specs} == {"registration_method"}
+
+
+def test_sensitivity_operators_must_be_configured_operators(tmp_path):
+    config, _ = _setup(tmp_path, '\n[sensitivity]\noperators = ["noise_aware_pyramid"]\n')
+    with pytest.raises(ValueError, match="operators"):
+        load_protocol_config(config)

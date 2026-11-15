@@ -36,12 +36,12 @@ def test_matrix_rows_cover_registrations_truth_modes_and_layers(tmp_path):
     config, out = _setup(tmp_path)
     assert run_protocol(config, out_root=out) == 0
     rows = _rows(out)
-    # 2 samples x 2 registrations x 1 operator x 3 truth modes (none + both, references present) x 6 layer groups
-    assert len(rows) == 2 * 2 * 3 * 6
+    # 2 samples x 2 registrations x 1 operator x 4 truth modes (none + the three, references present) x 6 layer groups
+    assert len(rows) == 2 * 2 * 4 * 6
     assert {k.metric for k in rows} == {f"layer_{g}" for g in REPORT_GROUPS}
     variants = json.loads((out / "protocol-fixture" / "variants.json").read_text())
     modes = {v["spec"]["truth_mode"] for v in variants.values()}
-    assert modes == {"none", "registration_method", "fusion_operator"}
+    assert modes == {"none", "registration_method", "registration_method_fullmask", "fusion_operator"}
     assert (out / "protocol-fixture" / "protocol_summary.md").read_text().count("| all |") > 0
 
 

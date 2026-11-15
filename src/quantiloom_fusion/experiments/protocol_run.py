@@ -336,7 +336,7 @@ def _numeric(row: dict) -> dict[str, float]:
 
 
 def _truth_modes(sample: _Sample) -> list[TruthMode | None]:
-    return [None, TruthMode.REGISTRATION, TruthMode.FUSION] if sample.has_references else [None]
+    return [None, *TruthMode] if sample.has_references else [None]
 
 
 def _layer_metric(group: str) -> str:
@@ -391,7 +391,7 @@ class _Run:
         sweeps = [(PerturbationKind.INVERSE_DEPTH_BIAS, s.bias), (PerturbationKind.SMOOTH_FIELD, s.field)]
         for op in self.cfg.operators:
             for kind, amps in sweeps:
-                for mode in (TruthMode.REGISTRATION, TruthMode.FUSION):
+                for mode in TruthMode:
                     specs = {a: _base_spec(self.cfg) | {"item": "sensitivity", "perturbation": kind.value,
                                                          "amplitude": a, "truth_mode": mode.value,
                                                          "corr_len_px": s.corr_len_px, "seed": s.seed}

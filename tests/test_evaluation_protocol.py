@@ -209,6 +209,12 @@ def test_registration_reference_uses_the_oracle_support_and_fusion_reference_ful
     op = Recording()
     evaluate_point(scene, op, scene.oracle_warps, TruthMode.FUSION)
     assert len(op.supports) == 1  # the FUSION reference is the common baseline rule, not this operator
+    op = Recording()
+    rows = evaluate_point(scene, op, scene.oracle_warps, TruthMode.REGISTRATION_FULLMASK)
+    fused_input, reference_input = op.supports
+    assert reference_input.all()  # same operator, full masks
+    assert {r["truth_rule"] for r in rows} == {"recording"}
+    assert {r["truth_mode"] for r in rows} == {"registration_method_fullmask"}
 
 
 def test_truth_modes_need_clean_images_and_a_fixed_window():

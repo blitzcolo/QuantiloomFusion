@@ -9,6 +9,11 @@ no warp.  Two modes that must never be mixed:
   camera pair could deliver with perfect registration, so occluded pixels
   fall back to the reference band there too.  The score is the loss from
   misregistration and sensor degradation; the oracle is its upper bound.
+* ``REGISTRATION_FULLMASK``: the same operator on the clean images with full
+  masks, i.e. the occluded region keeps the IR content a co-view camera sees
+  there.  No registration can deliver that content, so the oracle is not an
+  upper bound near occlusions; reported beside ``REGISTRATION`` so a reader
+  can see how much the choice of reference support moves the numbers.
 * ``FUSION``: compare fusion operators.  Reference = one common baseline rule
   (``laplacian_pyramid_masked`` on full masks, which equals the plain
   ``laplacian_pyramid``) applied to the clean images, identical for every
@@ -36,6 +41,7 @@ BASELINE_RULE = "laplacian_pyramid_masked"
 
 class TruthMode(enum.StrEnum):
     REGISTRATION = "registration_method"
+    REGISTRATION_FULLMASK = "registration_method_fullmask"
     FUSION = "fusion_operator"
 
 
@@ -63,7 +69,7 @@ def clean_input(clean: dict[Band, np.ndarray], geometry: dict[Band, CameraGeomet
 def truth_reference(mode: TruthMode, operator: FusionMethod, clean: FusionInput) -> tuple[np.ndarray, str]:
     """The reference image for ``mode`` and the name of the rule that made it."""
     match mode:
-        case TruthMode.REGISTRATION:
+        case TruthMode.REGISTRATION | TruthMode.REGISTRATION_FULLMASK:
             return operator.fuse(clean).image, operator.name
         case TruthMode.FUSION:
             return create(BASELINE_RULE).fuse(clean).image, BASELINE_RULE

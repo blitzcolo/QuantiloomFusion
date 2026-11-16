@@ -35,6 +35,21 @@ def check_expected(actual,expected,path='sensor'):
         elif a!=v:raise ValueError(f'effective {path}.{k} mismatch: {a!r} vs {v!r}')
 
 
+def raw_clip_fractions(raw,profile,black_level_dn):
+    """Fractions of a raw DN array at the ADC top and at the full-well (or ADC) ceiling.
+
+    Full well reads full_well_e / electrons_per_dn above the black level the
+    renderer actually applied (0 DN before Quantiloom 0.10.1, a preset or
+    configured pedestal since), not above 0 DN.
+    """
+    adc=(1<<profile['adc_bits'])-1
+    out={'adc_max_fraction':float((raw>=adc).mean())}
+    if 'full_well_e' in profile:
+        ceiling=min(adc,math.floor(profile['full_well_e']/profile['electrons_per_dn']+black_level_dn))
+        out['full_well_or_adc_fraction']=float((raw>=ceiling).mean())
+    return out
+
+
 def verify_capture(record_path,camera,inspect_pixels=False):
     record=load_json(record_path)
     if record.get('state')!='complete' or record.get('capture_status')!='complete':raise ValueError('incomplete render transaction')
@@ -79,12 +94,7 @@ def verify_capture(record_path,camera,inspect_pixels=False):
                         expected=record['record_id'] if k.endswith('record_id') else product['product_id']
                         if f.header().get(k)!=expected:raise ValueError('EXR transaction identity mismatch')
                 qa[key]={'min':float(a.min()),'max':float(a.max()),'std':float(a.std()),'flat':bool(a.std()==0)}
-                if key=='rawdn':
-                    adc=(1<<camera['profile']['adc_bits'])-1
-                    qa[key]['adc_max_fraction']=float(np.mean(a>=adc))
-                    if 'full_well_e' in camera['profile']:
-                        ceiling=min(adc,math.floor(camera['profile']['full_well_e']/camera['profile']['electrons_per_dn']))
-                        qa[key]['full_well_or_adc_fraction']=float(np.mean(a>=ceiling))
+                if key=='rawdn':qa[key].update(raw_clip_fractions(a,camera['profile'],float(actual['readout'].get('black_level_dn',0.0))))
     if set(selected)!={'measurement','rawdn','corrected','display'}:raise ValueError('missing required sensor product(s)')
     reference=next((p for p in record['products'] if p['path']=='frame.exr'),None)
     if not reference:raise ValueError('missing main render reference')

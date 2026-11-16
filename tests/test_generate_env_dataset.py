@@ -485,6 +485,17 @@ class PlanningContracts(unittest.TestCase):
                 else:self.config.write_text(tomlio.toml_text(broken))
                 with self.assertRaisesRegex(ValueError,message):settings.read_settings(self.config)
 
+    def test_raw_full_well_ceiling_sits_above_the_black_level(self):
+        import numpy as np
+        vis={'adc_bits':12,'full_well_e':20000.0,'electrons_per_dn':5.0}
+        # Full well is 4000 DN of signal: 4064 DN on a 64 DN pedestal.
+        raw=np.array([64.0,3999.0,4030.0,4063.0,4064.0,4070.0,4095.0,4095.0])
+        self.assertEqual(export_record.raw_clip_fractions(raw,vis,64.0),{'adc_max_fraction':0.25,'full_well_or_adc_fraction':0.5})
+        self.assertEqual(export_record.raw_clip_fractions(raw,vis,0.0)['full_well_or_adc_fraction'],0.75)
+        # The ADC top caps the ceiling; a thermal profile has no full well.
+        self.assertEqual(export_record.raw_clip_fractions(raw,vis,200.0)['full_well_or_adc_fraction'],0.25)
+        self.assertEqual(export_record.raw_clip_fractions(raw,{'adc_bits':12},64.0),{'adc_max_fraction':0.25})
+
     def test_pose_survives_float32_far_from_origin(self):
         # The renderer rebuilds the view basis in float32 from look_at - position.
         self.settings['scenes'][0].update(target=[-508.6,-117.6,-406.4],radius_m=600.0);self.save()

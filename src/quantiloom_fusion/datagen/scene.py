@@ -84,7 +84,7 @@ def scene_for_band(base,band,materials,d,solar,acq=None):
     doc=copy.deepcopy(base)
     for key in ("sensor","isp","effects","postprocess","thermography","dataset"):
         doc.pop(key,None)
-    doc.setdefault("renderer",{}).update(spp=d["spp"],environment_map_enabled=False)
+    doc.setdefault("renderer",{}).update(spp=d.get("spp_by_band",{}).get(band,d["spp"]),environment_map_enabled=False)
     limits={'vis':(400,700),'mwir':(3000,5000),'lwir':(8000,12000)}[band]
     doc.setdefault("spectral",{}).update(mode=MODES[band],band=band.upper(),
         wavelength_nm=sum(limits)/2,lambda_min=limits[0],lambda_max=limits[1])

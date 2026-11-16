@@ -276,6 +276,16 @@ class PlanningContracts(unittest.TestCase):
         self.settings['scenes'][0]['extra_models']=[{'file':model.as_posix(),'name':'clash'}];self.save()
         with self.assertRaisesRegex(ValueError,'collides'):self.plan()
 
+    def test_spp_by_band_overrides_the_band_and_its_reference(self):
+        self.settings['dataset']['spp_by_band']={'vis':1024};self.save()
+        plan=self.plan();sample=plan['samples'][0]
+        jobs={k:tomllib.loads((self.out/c['job']).read_text()) for k,c in sample['cameras'].items()}
+        self.assertEqual(jobs['vis']['renderer']['spp'],1024)
+        self.assertEqual(jobs['lwir']['renderer']['spp'],self.settings['dataset']['spp'])
+        for bad in ({'vis':0},{'swir':4},{}):
+            self.settings['dataset']['spp_by_band']=bad;self.save()
+            with self.assertRaises(ValueError):settings.read_settings(self.config)
+
     def test_extra_models_are_validated(self):
         for bad,msg in (([{'name':'x'}],'needs'),([{'file':'a.gltf','name':'x','motion':{}}],'motion'),
                         ([{'file':'a.gltf','name':'x','translation':[1,2]}],'three'),

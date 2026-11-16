@@ -57,9 +57,16 @@ def read_settings(path):
     doc=tomllib.loads(path.read_text(encoding="utf-8-sig"))
     check_keys(doc,{"dataset","sampling","scenes","cameras","reference_subset"},"root")
     d=doc["dataset"]
-    check_keys(d,{"name","qt_root","cli","seed","spp","wavelength_samples","thermal_mode","atmosphere_mode","atmosphere_model_pack","solar_ir_policy","daylight_solar_scale","atmosphere_air","ir_materials","noise_seed_policy","geometry_truth","verification","closure_audit_every"},"dataset")
+    check_keys(d,{"name","qt_root","cli","seed","spp","wavelength_samples","thermal_mode","atmosphere_mode","atmosphere_model_pack","solar_ir_policy","daylight_solar_scale","atmosphere_air","ir_materials","noise_seed_policy","geometry_truth","verification","closure_audit_every","spp_by_band"},"dataset")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+",d["name"]):raise ValueError("unsafe dataset name")
     for k in ("spp","wavelength_samples"):positive(d[k],k,True)
+    if "spp_by_band" in d:
+        # Per-band samples per pixel (e.g. a low-light VIS study at 1024 spp while the thermal
+        # bands stay at the dataset spp); a band's co-view reference uses the same value.
+        if not isinstance(d["spp_by_band"],dict) or not d["spp_by_band"]:
+            raise ValueError("spp_by_band must be a non-empty table of band = spp")
+        check_keys(d["spp_by_band"],{"vis","mwir","lwir"},"dataset.spp_by_band")
+        for band,value in d["spp_by_band"].items():positive(value,f"spp_by_band.{band}",True)
     if type(d["seed"]) is not int or not 0<=d["seed"]<=0xffffffff:raise ValueError("seed must be uint32")
     if d["thermal_mode"] not in ("authored","solved"):raise ValueError("thermal_mode must be authored or solved")
     if type(d.get("closure_audit_every",0)) is not int or d.get("closure_audit_every",0)<0:

@@ -27,6 +27,7 @@ from quantiloom_fusion.evaluation.protocol import (
     PerturbationKind,
     Sweep,
     epe_columns,
+    evaluate_band_subset,
     evaluate_point,
     inflation_experiment,
     is_calibrated,
@@ -401,3 +402,35 @@ def test_truth_metrics_report_the_mean_offset_and_a_demeaned_psnr():
     assert m["truth_PSNR"] < m["truth_PSNR_demeaned"]
     empty = truth_metrics(fused, ref, np.zeros(ref.shape, bool))
     assert np.isnan(empty["truth_mean_offset"]) and np.isnan(empty["truth_PSNR_demeaned"])
+
+
+def test_band_subsets_are_scored_against_one_reference_from_every_band():
+    scene = _scene()
+    op = create("laplacian_pyramid_masked")
+    reference = create("laplacian_pyramid_masked").fuse(clean_input(scene.clean, scene.geometry, Band.VIS)).image
+    masks = layer_masks(scene.layers)
+    # The full set is exactly the FUSION-mode matrix row.
+    full = evaluate_band_subset(scene, (Band.VIS, Band.LWIR), op)
+    point = evaluate_point(scene, op, scene.oracle_warps, TruthMode.FUSION)
+    for a, b in zip(full, point, strict=True):
+        assert a["layer"] == b["layer"]
+        np.testing.assert_equal([a["truth_MSE"], a["Qabf"], a["cleansrc_Qabf"]],
+                                [b["truth_MSE"], b["Qabf"], b["cleansrc_Qabf"]])
+    # VIS alone: the VIS input against the same reference, on the same (full-scene) layers.
+    alone = evaluate_band_subset(scene, (Band.VIS,), create("reference_only"))
+    assert [r["layer"] for r in alone] == [r["layer"] for r in full]
+    for row in alone:
+        m = masks[row["layer"]]
+        assert row["n_pixels"] == int(m.sum())
+        if m.any():
+            diff = scene.images[Band.VIS][m].astype(np.float64) - reference[m]
+            assert row["truth_MSE"] == pytest.approx(np.mean(diff**2))
+            assert np.isfinite(row["cleansrc_Qabf"])
+        assert all(np.isnan(row[k]) for k in ("SCD", "Qabf", "MS_SSIM"))
+    assert _row(alone, "correspondable")["truth_MSE"] != _row(full, "correspondable")["truth_MSE"]
+
+
+@pytest.mark.parametrize("bands", [(Band.LWIR,), (Band.VIS, Band.MWIR), (Band.VIS, Band.VIS), ()])
+def test_band_subset_must_start_with_the_reference_and_use_scene_bands(bands):
+    with pytest.raises(ValueError, match="band subset"):
+        evaluate_band_subset(_scene(), bands, create("laplacian_pyramid_masked"))

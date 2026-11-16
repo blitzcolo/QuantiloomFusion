@@ -109,15 +109,16 @@ def context_metrics(view: FusedView, mask: np.ndarray) -> dict[str, float]:
 
 
 def source_ref_metrics(view: FusedView, mask: np.ndarray) -> dict[str, float]:
-    """SCD / Qabf / MS-SSIM on ``mask`` with each band restricted to its own support.
+    """SCD / Qabf / MS-SSIM on ``mask`` with each band restricted to its own support; NaN with a
+    single source (the reference band passed through has no fusion to score).
 
     ``ms_ssim_fusion_n`` only discards the finest-scale window around a footprint edge, so fill
     outside the footprint still leaks through the coarser scales (about 5e-5 on a 0.8 score,
     zero beyond 32 px).  Here every non-trivial support is eroded by ``MS_SSIM_MARGIN_PX``
     for the MS-SSIM term only; SCD and Qabf already confine each band exactly.
     """
-    if not mask.any():
-        return dict.fromkeys(SOURCE_METRIC_KEYS, _NAN)
+    if not mask.any() or len(view.sources) < 2:
+        return dict.fromkeys(SOURCE_METRIC_KEYS, _NAN)  # a single band has no fusion to score
     bands = [b for b in BANDS if b in view.sources]
     srcs = [np.asarray(view.sources[b], np.float64) for b in bands]
     sups = [view.supports[b] for b in bands]

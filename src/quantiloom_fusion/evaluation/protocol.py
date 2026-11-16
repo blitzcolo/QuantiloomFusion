@@ -14,7 +14,7 @@ import enum
 import math
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -103,6 +103,29 @@ def evaluate_point(scene: EvalScene, operator: FusionMethod, warps: dict[Band, W
                 row |= clean_source_metrics(fused, scene.clean, mask)
         rows.append(row)
     return rows
+
+
+def evaluate_band_subset(scene: EvalScene, bands: Sequence[Band], operator: FusionMethod) -> list[dict]:
+    """Fuse only ``bands`` with the oracle warps; score against the FUSION reference of all bands.
+
+    ``scene`` holds every band of the configuration (images, clean co-view images, layers);
+    ``bands`` is a subset starting with the reference band.  The fused image comes from the
+    subset alone (the reference band by itself when ``bands`` is just the reference), while the
+    truth reference is the common baseline rule on the clean images of *every* band in the scene,
+    and the clean-source metrics use every clean band too -- so all subsets are scored against
+    one target, and a row says how much of the full-information clean fusion the subset
+    recovers.  The layer groups are those of the full scene (the worst layer over all source
+    bands), so every subset is scored on the same pixels.  Source-referenced metrics use the
+    subset's own sources (undefined, NaN, for the reference band alone).
+    """
+    if not bands or bands[0] != scene.reference or len(set(bands)) != len(bands):
+        raise ValueError(f"band subset {list(bands)} must be distinct bands starting with {scene.reference}")
+    if set(bands) - set(scene.images):
+        raise ValueError(f"band subset {list(bands)} has bands the scene lacks: "
+                         f"{sorted(set(bands) - set(scene.images))}")
+    sub = replace(scene, images={b: scene.images[b] for b in bands},
+                  oracle_warps={b: w for b, w in scene.oracle_warps.items() if b in bands})
+    return evaluate_point(sub, operator, sub.oracle_warps, TruthMode.FUSION)
 
 
 def evaluate_zeroshot(scene: EvalScene, vis_rgb: np.ndarray, method: FusionMethod) -> list[dict]:

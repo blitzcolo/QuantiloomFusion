@@ -13,6 +13,13 @@ Four items, each switched on in the config's ``items`` list:
   similarity and grid step, on the correspondable and the edge layer.
 * ``complementarity``: ``evaluation.complementarity`` on the whole dataset,
   written once as a Markdown report.
+* ``band_ablation``: on samples with co-view references, every band set of the config key
+  ``band_sets`` (lists starting with ``"vis"``; ``["vis"]`` alone means the VIS input is the
+  fused image) fused with the oracle warps by ``laplacian_pyramid_masked`` and scored in the
+  FUSION truth mode against one common reference: the baseline rule on the clean co-view images
+  of *all* configured bands (``evaluation.protocol.evaluate_band_subset``).  Layer groups are the
+  full configuration's, so every band set is scored on the same pixels; the clean-source metrics
+  use every clean band.  The spec names the band set and the reference's band set.
 * ``zeroshot``: the public deep models named in the config key ``zeroshot``
   (``fusion.zeroshot``, author weights) on the raw unregistered VIS + LWIR
   pair of every sample with co-view references -- native resolutions, the
@@ -72,6 +79,7 @@ from ..evaluation.protocol import (
     PerturbationKind,
     Sweep,
     epe_columns,
+    evaluate_band_subset,
     evaluate_point,
     evaluate_zeroshot,
     inflation_experiment,
@@ -99,14 +107,14 @@ from ..signal.normalize import IrLinear, IrTemperature, VisDisplay, VisRawLinear
 from .driver import _ErrorLog
 from .variants import fingerprint, ir_normalizer, vis_normalizer
 
-ITEMS = ("matrix", "sensitivity", "registration_study", "complementarity", "zeroshot")
+ITEMS = ("matrix", "sensitivity", "registration_study", "complementarity", "zeroshot", "band_ablation")
 REGISTRATIONS = ("oracle", "epipolar_sweep", "infinity_homography", "resize")
 OPERATORS = ("laplacian_pyramid_masked", "noise_aware_pyramid")
 PROTOCOL_VERSION = 1
 
 _TOP = {"name", "dataset", "bands", "vis_input", "ir_input", "items", "registration", "operators",
         "levels", "kappa", "fpn", "similarity", "z_min_m", "n_hypotheses", "sensitivity", "registration_study",
-        "complementarity", "zeroshot"}
+        "complementarity", "zeroshot", "band_sets"}
 _SENS = {"bias", "field", "corr_len_px", "seed", "inflation", "operators", "truth_modes"}
 _STUDY = {"similarities", "free_steps"}
 _COMP = {"view_group_blocks"}
@@ -149,6 +157,7 @@ class ProtocolConfig:
     registration_study: StudySpec = field(default_factory=StudySpec)
     view_group_blocks: int | None = None
     zeroshot: tuple[str, ...] = ()  # registered zero-shot model names (item "zeroshot")
+    band_sets: tuple[tuple[Band, ...], ...] = ()  # item "band_ablation": subsets of bands, each from "vis"
 
     @property
     def reference(self) -> Band:
@@ -244,6 +253,9 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
         raise _bad("zeroshot", "models are listed but 'zeroshot' is not in items")
     else:
         zeroshot = ()
+    band_sets = _band_sets(data, bands) if "band_ablation" in items else ()
+    if "band_sets" in data and "band_ablation" not in items:
+        raise _bad("band_sets", "band sets are listed but 'band_ablation' is not in items")
     blocks = comp.get("view_group_blocks")
     if blocks is not None and (type(blocks) is not int or blocks < 2):
         raise _bad("complementarity.view_group_blocks", f"expected an integer >= 2, got {blocks!r}")
@@ -265,8 +277,27 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
             similarities=_choices(study, "similarities", tuple(str(s) for s in Similarity))
             if "similarities" in study else StudySpec.similarities,
             free_steps=tuple(s if s == "sweep" else float(s) for s in steps)),
-        view_group_blocks=blocks, zeroshot=zeroshot,
+        view_group_blocks=blocks, zeroshot=zeroshot, band_sets=band_sets,
     )
+
+
+def _band_sets(data: dict, bands: tuple[Band, ...]) -> tuple[tuple[Band, ...], ...]:
+    """@@band_sets@@: a non-empty list of distinct band lists, each of distinct configured bands
+    starting with the reference "vis" (["vis"] alone is allowed)."""
+    value = data.get("band_sets")
+    allowed = [str(b) for b in bands]
+    if not isinstance(value, list) or not value:
+        raise _bad("band_sets", f"expected a non-empty list of band lists, got {value!r}")
+    out = []
+    for item in value:
+        if (not isinstance(item, list) or not item or item[0] != str(Band.VIS) or len(set(item)) != len(item)
+                or any(b not in allowed for b in item)):
+            raise _bad("band_sets", f"each set must list distinct bands from {allowed} starting with 'vis', "
+                       f"got {item!r}")
+        out.append(tuple(Band(b) for b in item))
+    if len({frozenset(s) for s in out}) != len(out):
+        raise _bad("band_sets", f"duplicate band sets in {value!r}")
+    return tuple(out)
 
 
 
@@ -419,6 +450,17 @@ def _zeroshot_method(name: str):
     return create(name)
 
 
+def band_ablation_spec(cfg: ProtocolConfig, bands: tuple[Band, ...]) -> dict:
+    """Spec of one band set: the set, the band set of the common truth reference (all configured
+    bands), oracle warps and the masked pyramid -- or the VIS input passed through for ``("vis",)``."""
+    single = len(bands) == 1
+    return _base_spec(cfg) | {
+        "item": "band_ablation", "band_set": [str(b) for b in bands],
+        "reference_band_set": [str(b) for b in cfg.bands], "registration": "none" if single else "oracle",
+        "truth_mode": TruthMode.FUSION.value, "truth_rule": BASELINE_RULE,
+    } | ({"operator": "reference_only"} if single else _operator_spec(cfg, "laplacian_pyramid_masked"))
+
+
 def zeroshot_input_domain(cfg: ProtocolConfig) -> str:
     """Name of the zero-shot input domain, e.g. ``vis_display+lwir_temperature_260-340K``."""
     lo, hi = ir_normalizer(cfg.ir_input).window_k
@@ -484,6 +526,18 @@ class _Run:
             for row in rows:
                 values = _numeric(row) | epe | {"calibrated": float(is_calibrated(reg))}
                 self.put(sample.sid, spec, _layer_metric(row["layer"]), values)
+
+    def band_ablation(self, sample: _Sample) -> None:
+        if not sample.has_references:
+            return
+        for bands in self.cfg.band_sets:
+            spec = band_ablation_spec(self.cfg, bands)
+            if not self.pending(sample.sid, spec, map(_layer_metric, _GROUPS)):
+                continue
+            op = create("reference_only") if len(bands) == 1 else create("laplacian_pyramid_masked",
+                                                                            levels=self.cfg.levels)
+            for row in evaluate_band_subset(sample.scene, bands, op):
+                self.put(sample.sid, spec, _layer_metric(row["layer"]), _numeric(row))
 
     def sensitivity(self, sample: _Sample) -> None:
         if not sample.has_references:
@@ -656,6 +710,17 @@ def summarize_protocol(out_dir: Path, dataset: ThreeBandDataset) -> tuple[Path, 
                   f"{r['operator']} | {r['truth_mode']} | {r['n_samples']} | {fmt(r.get('truth_PSNR'))} | "
                   f"{fmt(r.get('SCD'), digits=3)} | {fmt(r.get('Qabf'), digits=3)} | "
                   f"{fmt(r.get('hp_dev_RMSE'), 1e3)} | {fmt(r.get('epe_mean_px'))} |")
+    ba = [r for r in rows if r.get("item") == "band_ablation"]
+    if ba:
+        md += ["", "# Protocol summary: band_ablation (means over samples; FUSION truth mode, common reference "
+               "from all configured bands)", "",
+               "| condition | layer | band set | reference bands | n | truth PSNR | demeaned PSNR | mean offset | "
+               "truth SSIM | cleansrc Qabf |", "|---|---|---|---|---|---|---|---|---|---|"]
+        for r in ba:
+            md.append(f"| {r['condition']} | {r['metric'].removeprefix('layer_')} | {'+'.join(r['band_set'])} | "
+                      f"{'+'.join(r['reference_band_set'])} | {r['n_samples']} | {fmt(r.get('truth_PSNR'))} | "
+                      f"{fmt(r.get('truth_PSNR_demeaned'))} | {fmt(r.get('truth_mean_offset'), digits=4)} | "
+                      f"{fmt(r.get('truth_SSIM'), digits=3)} | {fmt(r.get('cleansrc_Qabf'), digits=3)} |")
     zs = [r for r in rows if r.get("item") == "zeroshot"]
     if zs:
         md += ["", "# Protocol summary: zeroshot (means over samples; FUSION truth mode, zero-shot input domain)", "",
@@ -696,7 +761,8 @@ def run_protocol(config_path: Path, *, limit: int | None = None, samples: list[s
         ids = tuple(s for s in ids if s in set(samples))
     if limit is not None:
         ids = ids[:limit]
-    per_sample = [i for i in ("matrix", "sensitivity", "registration_study", "zeroshot") if i in cfg.items]
+    per_sample = [i for i in ("matrix", "band_ablation", "sensitivity", "registration_study", "zeroshot")
+                  if i in cfg.items]
     t0 = time.monotonic()
     error_log = _ErrorLog(out_dir / "errors.jsonl")
     with ResultStore(out_dir / "results.jsonl") as store:

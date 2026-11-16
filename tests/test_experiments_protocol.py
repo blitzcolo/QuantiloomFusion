@@ -265,3 +265,76 @@ def test_zeroshot_without_torch_writes_error_rows_and_fails(tmp_path, monkeypatc
     assert run_protocol(config, out_root=out) == 1
     errors = [json.loads(line) for line in (out / "protocol-fixture" / "errors.jsonl").read_text().splitlines()]
     assert len(errors) == 1 and "torch" in errors[0]["error"] and errors[0]["fingerprint"]
+
+
+
+# --- band_ablation item ----------------------------------------------------------------------
+
+BAND_SETS = 'band_sets = [["vis"], ["vis", "mwir"], ["vis", "lwir"], ["vis", "mwir", "lwir"]]\n'
+
+
+def _ba_setup(tmp_path, items='["matrix", "band_ablation"]', band_sets=BAND_SETS):
+    root = build_fixture(tmp_path / "ds", samples=2, size=(32, 24), references=True)
+    config = tmp_path / "protocol.toml"
+    text = (CONFIG.format(dataset=root.as_posix()).replace('bands = ["vis", "lwir"]', 'bands = ["vis", "mwir", "lwir"]')
+            .replace('items = ["matrix"]', f"items = {items}")
+            .replace('registration = ["oracle", "infinity_homography"]', 'registration = ["oracle"]'))
+    config.write_text(text + band_sets, encoding="utf-8")
+    return config, tmp_path / "out"
+
+
+def test_band_ablation_rows_share_one_reference_and_the_full_set_matches_the_matrix(tmp_path):
+    config, out = _ba_setup(tmp_path)
+    cfg = load_protocol_config(config)
+    assert [tuple(map(str, s)) for s in cfg.band_sets] == [("vis",), ("vis", "mwir"), ("vis", "lwir"),
+                                                           ("vis", "mwir", "lwir")]
+    assert run_protocol(config, out_root=out) == 0
+    rows = _rows(out)
+    variants = json.loads((out / "protocol-fixture" / "variants.json").read_text())
+    specs = {v["fingerprint"]: v["spec"] for v in variants.values()}
+    ablation = {fp: s for fp, s in specs.items() if s["item"] == "band_ablation"}
+    assert len(ablation) == 4
+    assert len([k for k in rows if k.method_fingerprint in ablation]) == 2 * 4 * len(REPORT_GROUPS)
+    for spec in ablation.values():
+        assert spec["reference_band_set"] == ["vis", "mwir", "lwir"]
+        assert spec["truth_mode"] == "fusion_operator" and spec["truth_rule"] == "laplacian_pyramid_masked"
+    alone = next(fp for fp, s in ablation.items() if s["band_set"] == ["vis"])
+    assert (ablation[alone]["operator"], ablation[alone]["registration"]) == ("reference_only", "none")
+    full = next(fp for fp, s in ablation.items() if s["band_set"] == ["vis", "mwir", "lwir"])
+    assert (ablation[full]["operator"], ablation[full]["registration"]) == ("laplacian_pyramid_masked", "oracle")
+    matrix = next(fp for fp, s in specs.items() if s["item"] == "matrix" and s["truth_mode"] == "fusion_operator")
+    by_key = {(k.method_fingerprint, k.sample_id, k.metric): v for k, v in rows.items()}
+    for (fp, sid, metric), v in by_key.items():
+        if fp == full:
+            assert v["truth_MSE"] == by_key[(matrix, sid, metric)]["truth_MSE"] or (
+                v["truth_MSE"] != v["truth_MSE"])  # NaN on an empty group
+        if fp == alone:
+            assert v["SCD"] != v["SCD"] and "cleansrc_Qabf" in v and "truth_PSNR_demeaned" in v
+    md = (out / "protocol-fixture" / "protocol_summary.md").read_text()
+    assert "| vis+mwir+lwir | vis+mwir+lwir |" in md and "| vis | vis+mwir+lwir |" in md
+
+
+@pytest.mark.parametrize("band_sets, match", [
+    ('band_sets = [["lwir"]]\n', "band_sets"),
+    ('band_sets = [["vis", "vis"]]\n', "band_sets"),
+    ('band_sets = [["vis", "swir"]]\n', "band_sets"),
+    ('band_sets = []\n', "band_sets"),
+    ('band_sets = [["vis"], ["vis"]]\n', "duplicate"),
+    ('band_sets = [["vis", "mwir"], ["vis", "lwir", "mwir"], ["vis", "mwir", "lwir"]]\n', "duplicate"),
+    ("", "band_sets"),
+])
+def test_band_sets_are_validated(tmp_path, band_sets, match):
+    config, _ = _ba_setup(tmp_path, band_sets=band_sets)
+    with pytest.raises(ValueError, match=match):
+        load_protocol_config(config)
+
+
+def test_band_sets_need_the_item_and_configured_bands(tmp_path):
+    config, _ = _ba_setup(tmp_path, items='["matrix"]')
+    with pytest.raises(ValueError, match="not in items"):
+        load_protocol_config(config)
+    config, _ = _ba_setup(tmp_path / "b")
+    config.write_text(config.read_text().replace('bands = ["vis", "mwir", "lwir"]', 'bands = ["vis", "lwir"]'),
+                      encoding="utf-8")
+    with pytest.raises(ValueError, match="band_sets"):
+        load_protocol_config(config)

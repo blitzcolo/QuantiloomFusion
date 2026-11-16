@@ -1,0 +1,69 @@
+"""Torch-free support for the zero-shot public fusion models.
+
+Where the third-party code clones and author weights live (``build/models/``,
+gitignored, never committed; override with ``QUANTILOOM_ZEROSHOT_MODELS``), file
+hashing, and the input preparation the wrappers in ``fusion.zeroshot`` share.
+Nothing here imports torch, so it can be used and tested without it.
+
+Pixel convention: package pixel-index coordinates (pixel centres on integers,
+origin at the top-left pixel centre); the camera's continuous coordinates put
+that centre at (0.5, 0.5), hence the +-0.5 in the pure-scale map.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from ..dataset.types import CameraGeometry
+from ..geometry.camera import pixel_grid
+
+
+def models_dir() -> Path:
+    """Root of the third-party model clones: ``QUANTILOOM_ZEROSHOT_MODELS`` or ``<repo>/build/models``."""
+    env = os.environ.get("QUANTILOOM_ZEROSHOT_MODELS")
+    return Path(env) if env else Path(__file__).resolve().parents[3] / "build" / "models"
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def quantise_8bit(a: np.ndarray) -> np.ndarray:
+    """[0, 1] -> uint8 by round(x * 255) after clipping (an 8-bit image file, as the authors read)."""
+    return np.rint(np.clip(a, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def canvas_to_native(px: np.ndarray, py: np.ndarray, ref: CameraGeometry,
+                     src: CameraGeometry) -> tuple[np.ndarray, np.ndarray]:
+    """Pixel coordinates on the reference-size canvas -> native source pixel coordinates.
+
+    Pure scale about the principal points (the ``ResizeRegistrar`` form):
+    u_src = (u_ref + 0.5 - c_ref) * f_src / f_ref + c_src - 0.5.
+    """
+    nx = (px + 0.5 - ref.cx) * (src.fx / ref.fx) + src.cx - 0.5
+    ny = (py + 0.5 - ref.cy) * (src.fy / ref.fy) + src.cy - 0.5
+    return nx, ny
+
+
+def pure_scale_map(ref: CameraGeometry, src: CameraGeometry) -> np.ndarray:
+    """(H_ref, W_ref, 2) native source coordinates of every reference pixel under the pure-scale map."""
+    grid = pixel_grid(ref)
+    return np.stack(canvas_to_native(grid[..., 0], grid[..., 1], ref, src), axis=-1)
+
+
+def lwir_canvas_8bit(lwir: np.ndarray, ref: CameraGeometry, src: CameraGeometry) -> np.ndarray:
+    """The normalised LWIR image quantised to 8 bit and resampled onto the reference frame by the
+    pure-scale map (bilinear, 0 outside the LWIR image): the model's own matcher does the rest."""
+    lwir8 = quantise_8bit(np.asarray(lwir, np.float32))
+    rmap = pure_scale_map(ref, src)
+    return cv2.remap(lwir8, rmap[..., 0].astype(np.float32), rmap[..., 1].astype(np.float32),
+                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)

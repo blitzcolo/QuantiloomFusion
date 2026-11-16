@@ -10,25 +10,21 @@ quantiloom_fusion.fusion.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
-import os
 import time
-from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 
 from ..core.bands import Band
-from ..geometry.camera import pixel_grid
 from ..geometry.warp import Warp
 from .base import Capabilities, FusionInput, FusionMethod, FusionOutput
 from .registry import register
+from .zeroshot_assets import canvas_to_native, file_sha256, lwir_canvas_8bit, models_dir, quantise_8bit
 
 __optional_deps__ = ("torch",)
 
-MODELS_DIR = Path(os.environ.get("QUANTILOOM_ZEROSHOT_MODELS", Path(__file__).resolve().parents[3] / "build" / "models"))
+MODELS_DIR = models_dir()
 CODE_DIR = MODELS_DIR / "SuperFusion"
 PREPROCESSING = {
     "vis": "display sRGB, quantised to 8 bit (round(x*255)), fed as RGB in [0,1]",
@@ -48,10 +44,6 @@ def _shim():
     return module
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _to_ycrcb(rgb: torch.Tensor):
     r, g, b = rgb[:, 0:1], rgb[:, 1:2], rgb[:, 2:3]
     y = 0.299 * r + 0.587 * g + 0.114 * b
@@ -61,10 +53,6 @@ def _to_ycrcb(rgb: torch.Tensor):
 def _from_ycbcr(y: torch.Tensor, cb: torch.Tensor, cr: torch.Tensor) -> torch.Tensor:
     cr_c, cb_c = cr - 0.5, cb - 0.5
     return torch.cat([y + 1.403 * cr_c, y - 0.714 * cr_c - 0.344 * cb_c, y + 1.773 * cb_c], dim=1).clamp(0, 1)
-
-
-def _quantise(a: np.ndarray) -> np.ndarray:
-    return np.rint(np.clip(a, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
 class _SuperFusion(FusionMethod):
@@ -81,7 +69,7 @@ class _SuperFusion(FusionMethod):
         if not torch.cuda.is_available():
             raise RuntimeError("SuperFusion's dense matcher builds CUDA tensors at construction; no CUDA device")
         path = CODE_DIR / "checkpoint" / f"{self.checkpoint}.pth"
-        self.weights_sha256 = _sha256(path)
+        self.weights_sha256 = file_sha256(path)
         modules = _shim().import_modules(str(CODE_DIR))
         self._dm = modules.DenseMatcher()
         self._fn = modules.FusionNet()
@@ -92,26 +80,13 @@ class _SuperFusion(FusionMethod):
         self._dm.cuda().eval()
         self._fn.cuda().eval()
 
-    def _resize_map(self, x: FusionInput) -> np.ndarray:
-        gv, gl = x.geometry[x.reference], x.geometry[Band.LWIR]
-        grid = pixel_grid(gv)
-        return np.stack(
-            [
-                (grid[..., 0] + 0.5 - gv.cx) * (gl.fx / gv.fx) + gl.cx - 0.5,
-                (grid[..., 1] + 0.5 - gv.cy) * (gl.fy / gv.fy) + gl.cy - 0.5,
-            ],
-            axis=-1,
-        )
-
     def fuse(self, x: FusionInput) -> FusionOutput:
         self.check_input(x)
         if x.reference != Band.VIS or set(x.images) != {Band.VIS, Band.LWIR}:
             raise ValueError("SuperFusion fuses exactly VIS (reference) + LWIR")
-        vis8 = _quantise(np.asarray(x.images[Band.VIS], np.float32))
-        lwir8 = _quantise(np.asarray(x.images[Band.LWIR], np.float32))
-        rmap = self._resize_map(x)
-        ir8 = cv2.remap(lwir8, rmap[..., 0].astype(np.float32), rmap[..., 1].astype(np.float32),
-                        cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        gv, gl = x.geometry[x.reference], x.geometry[Band.LWIR]
+        vis8 = quantise_8bit(np.asarray(x.images[Band.VIS], np.float32))
+        ir8 = lwir_canvas_8bit(x.images[Band.LWIR], gv, gl)
         h, w = vis8.shape[:2]
         vi = torch.from_numpy(vis8).permute(2, 0, 1)[None].float().div(255).cuda()
         ir = torch.from_numpy(ir8)[None, None].float().div(255).repeat(1, 3, 1, 1).cuda()
@@ -129,9 +104,7 @@ class _SuperFusion(FusionMethod):
         ux = np.linspace(-1.0, 1.0, w)[None, :] + d[..., 0]
         uy = np.linspace(-1.0, 1.0, h)[:, None] + d[..., 1]
         px, py = ((ux + 1) * w - 1) / 2, ((uy + 1) * h - 1) / 2
-        gv, gl = x.geometry[x.reference], x.geometry[Band.LWIR]
-        nx = (px + 0.5 - gv.cx) * (gl.fx / gv.fx) + gl.cx - 0.5
-        ny = (py + 0.5 - gv.cy) * (gl.fy / gv.fy) + gl.cy - 0.5
+        nx, ny = canvas_to_native(px, py, gv, gl)
         valid = (nx >= 0) & (nx <= gl.width - 1) & (ny >= 0) & (ny <= gl.height - 1)
         warp = Warp(Band.VIS, Band.LWIR, np.stack([nx, ny], axis=-1), valid,
                     {"method": "superfusion_dense_matcher", "checkpoint": self.checkpoint,

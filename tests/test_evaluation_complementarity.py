@@ -12,6 +12,7 @@ from quantiloom_fusion.evaluation.complementarity_contrast import (
     boundary_pairs,
     decompose_contrast,
 )
+from quantiloom_fusion.evaluation.complementarity_report import _regression_cells
 from quantiloom_fusion.evaluation.complementarity_stats import (
     FrameId,
     PairArrays,
@@ -197,6 +198,14 @@ def test_r2_is_one_minus_sse_over_zero_predictor_variance():
     zero = regression_scores(frames[:6], frames[6:])
     assert zero.r2_ridge_vis == pytest.approx(1 - zero.ridge_vis / zero.var_total)
     assert zero.r2_ridge_vis > 0.5
+
+
+def test_regression_cells_report_n_a_for_an_isothermal_target():
+    # An isothermal frame de-means to zero everywhere: zero total variance and zero residuals.
+    cells = _regression_cells(100, 0.0, 0.0, 0.0, 0.0, 0.0)
+    assert cells == ["100", "0.00", "0.00", "0.00", "n/a", "n/a", "n/a", "0.00", "0.00", "n/a", "n/a", "n/a"]
+    cells = _regression_cells(10, 4.0, 2.0, 1.0, 8.0, 4.0)
+    assert cells[4:7] == ["+50.0%", "+0.50", "+0.75"] and cells[9:] == ["+50.0%", "-1.00", "+0.00"]
 
 
 def test_view_group_folds_never_share_a_view_group_between_train_and_test():

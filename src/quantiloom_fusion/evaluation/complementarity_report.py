@@ -36,12 +36,19 @@ def _pooled(folds: Sequence[FoldResult], pick) -> float:
     return float(sum(wi * pick(f) for wi, f in zip(w, folds, strict=True)) / sum(w))
 
 
+def _reduction(vis_only: float, both: float) -> str:
+    # A zero VIS-only residual (e.g. an isothermal frame: nothing to predict) has no reduction.
+    return f"{1 - both / vis_only:+.1%}" if vis_only else "n/a"
+
+
+def _r2(mse: float, total: float) -> str:
+    return f"{r2_vs_zero(mse, total):+.2f}" if total else "n/a"
+
+
 def _regression_cells(n: int, total: float, rv: float, rb: float, kv: float, kb: float) -> list[str]:
     return [
-        str(n), f"{total:.2f}", f"{rv:.2f}", f"{rb:.2f}", f"{1 - rb / rv:+.1%}",
-        f"{r2_vs_zero(rv, total):+.2f}", f"{r2_vs_zero(rb, total):+.2f}",
-        f"{kv:.2f}", f"{kb:.2f}", f"{1 - kb / kv:+.1%}",
-        f"{r2_vs_zero(kv, total):+.2f}", f"{r2_vs_zero(kb, total):+.2f}",
+        str(n), f"{total:.2f}", f"{rv:.2f}", f"{rb:.2f}", _reduction(rv, rb), _r2(rv, total), _r2(rb, total),
+        f"{kv:.2f}", f"{kb:.2f}", _reduction(kv, kb), _r2(kv, total), _r2(kb, total),
     ]
 
 

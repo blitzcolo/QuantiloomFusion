@@ -599,3 +599,17 @@ WSL 的 Linux Python 下同一环境变量直接生效（值为 `/mnt/d/...` 形
 ### 按波段的 spp（`dataset.spp_by_band`，2026-11-15）
 
 `[dataset]` 可选 `spp_by_band = { vis = 1024 }`：只覆盖列出的波段（及其共视点参考）的每像素样本数，其余波段沿用 `spp`。用途：第 6 章 E4 低照度复测只需提高可见光的样本数，热红外保持 32，避免把渲染时间放大到不必要的程度。不写该键的配置，任务文件与此前逐字节相同（`build/_parity/20261115-sppband-smoke`）。
+
+### 光子型读出：黑电平与偏置固定图样（`black_level_dn`、`bias_dn_rms`，2026-11-16）
+
+`[cameras.vis]`、`[cameras.mwir]` 可选两个键，只对光子型探测器有效（写在 `[cameras.lwir]` 报错）：
+
+- `black_level_dn`：ADC 基座，非负整数 DN，须小于 `2^adc_bits - 1`；写进任务的 `sensor.readout.black_level_dn`（浮点）。
+- `bias_dn_rms`：与曝光无关的逐像素偏置图样，非负 DN；写进 `sensor.photon.bias_dn_rms`。
+
+键路径按 Quantiloom-dev 0.10.1 源码核对（`CameraConfigIO.cpp` 读 `sensor.readout.black_level_dn` 与 `sensor.photon.bias_dn_rms`，`CpuCameraPipeline.cpp` / `camera_readout.comp.hlsl` 使用）。渲染器把 `bias_dn_rms` 当作已知偏置帧：raw DN 里有它，`corrected` 里按逐像素值精确扣掉（与 `apply_nuc` 无关）。`dsnu_e_rms` 则是暗电流的非均匀，按 `曝光 / dsnu_reference_exposure_s`（预设与本生成器都不写这个键，默认 0.01 s）缩放，0.10.1 起为均值等于平均暗电荷的对数正态。
+
+不写这两个键时任务里也没有它们，渲染器用预设值：0.10.1 起 `generic_cmos` 64 DN、`generic_cooled_photon_ir` 256 DN（0.10.0 及以前为 0），偏置图样为 0。所以同一份配置在 0.10.0 与 0.10.1 下的 VIS/MWIR 原始 DN 差一个基座；消费端的黑电平一律取自产品 `camera_config_toml`（渲染器实际使用的值），不受影响。
+
+对拍（`build/_parity/20261116-blacklevel`，Windows 解释器）：不写新键的冒烟与正式配置，改动前后 `plan` 的全部任务与 `provenance` 逐字节相同、计划除 `dataset_id` 与 `recipe.generator_*` 外相同（42 / 1884 个文件 `PARITY OK`）；theiss-exp 的 `ch6_formal.toml` 用新代码规划，1872 个任务文件在输出目录归一化后与 E0 数据集 `ch6-formal-0.10.0-r2` 逐字节相同，代回 E0 的输出目录后 sha256 与其计划里记录的 `job_sha256` 全部一致。冒烟渲染（`build/_scratch_blacklevel-20261116`，0.10.1 SDK，低照度 concrete 的 VIS 与 MWIR 两次采集，VIS 100 DN / 0.1 DN、MWIR 300 DN / 0.05 DN）：发布时的有效配置核对通过，产品 `camera_config_toml` 记录的正是这些值；VIS raw 最小 99 DN、中位 102 DN，两波段 `camera_raw_floor_clipped_fraction` 为 0（该键随 `image_metadata` 进入 sample.json）。
+

@@ -39,6 +39,10 @@ def sensor_config(band,c,d,identity):
             "apply_nuc":c["apply_nuc"],"nuc_residual_fraction":c["nuc_residual_fraction"]}
         # electrons_per_dn is a readout field, never a photon parameter.
         sensor["readout"]["electrons_per_dn"]=sensor["photon"].pop("electrons_per_dn")
+        # Optional; absent keys leave the preset's value and the job unchanged.
+        # Written as floats: the renderer reads both with GetDouble.
+        if "black_level_dn" in c:sensor["readout"]["black_level_dn"]=float(c["black_level_dn"])
+        if "bias_dn_rms" in c:sensor["photon"]["bias_dn_rms"]=float(c["bias_dn_rms"])
         if band=="vis":
             sensor["channels"]=[]
             for name,wave,val in [("R",[400.,540.,610.,700.],[0.,0.,.55,.25]),("G",[400.,470.,540.,620.,700.],[0.,.2,.6,.1,0.]),("B",[400.,460.,520.,700.],[.2,.55,0.,0.])]:

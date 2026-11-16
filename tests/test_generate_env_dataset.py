@@ -448,6 +448,43 @@ class PlanningContracts(unittest.TestCase):
                 self.config.write_text(tomlio.toml_text(broken))
                 with self.assertRaisesRegex(ValueError,message):settings.read_settings(self.config)
 
+    def test_photon_readout_keys_reach_the_job_and_are_validated(self):
+        # Without the keys the job states neither, so the renderer preset's black level applies.
+        p=self.plan();cams=p['samples'][0]['cameras']
+        job={b:tomllib.loads((self.out/cams[b]['job']).read_text())['sensor'] for b in constants.BANDS}
+        for band in ('vis','mwir'):
+            self.assertNotIn('black_level_dn',job[band]['readout']);self.assertNotIn('bias_dn_rms',job[band]['photon'])
+        self.settings['cameras']['vis'].update(black_level_dn=64,bias_dn_rms=0.1)
+        self.settings['cameras']['mwir']['black_level_dn']=256
+        self.save();self.out=self.root/'dataset-readout'
+        p=self.plan();sample=p['samples'][0]
+        job={b:tomllib.loads((self.out/c['job']).read_text())['sensor'] for b,c in sample['cameras'].items()}
+        self.assertEqual((job['vis']['readout']['black_level_dn'],job['vis']['photon']['bias_dn_rms']),(64.0,0.1))
+        self.assertEqual(job['mwir']['readout']['black_level_dn'],256.0)
+        self.assertNotIn('bias_dn_rms',job['mwir']['photon'])
+        self.assertNotIn('black_level_dn',job['lwir']['readout'])
+        # The renderer's effective config is checked against what was asked for.
+        self.assertEqual(sample['cameras']['vis']['sensor_expected']['readout']['black_level_dn'],64.0)
+        cases=[('lwir','black_level_dn',64,r'cameras\.lwir\.black_level_dn applies to photon detectors only'),
+               ('lwir','bias_dn_rms',0.1,r'cameras\.lwir\.bias_dn_rms applies to photon detectors only'),
+               ('vis','black_level_dn',64.0,r'cameras\.vis\.black_level_dn must be an integer DN in \[0, 4095\)'),
+               ('vis','black_level_dn',-1,r'cameras\.vis\.black_level_dn must be an integer DN'),
+               ('vis','black_level_dn',4095,r'cameras\.vis\.black_level_dn must be an integer DN in \[0, 4095\)'),
+               ('mwir','black_level_dn',True,r'cameras\.mwir\.black_level_dn must be an integer DN in \[0, 16383\)'),
+               ('mwir','bias_dn_rms',-0.1,r'cameras\.mwir\.bias_dn_rms must be a finite number >= 0'),
+               ('vis','bias_dn_rms','0.1',r'cameras\.vis\.bias_dn_rms must be a finite number >= 0'),
+               ('vis','bias_dn_rms',float('inf'),r'cameras\.vis\.bias_dn_rms must be a finite number >= 0')]
+        for band,key,value,message in cases:
+            with self.subTest(band=band,key=key,value=value):
+                broken=copy.deepcopy(self.settings);broken['cameras'][band][key]=value
+                if value==float('inf'):
+                    # tomlio refuses non-finite values; hand-write the key.
+                    del broken['cameras'][band][key]
+                    text=tomlio.toml_text(broken).replace('["cameras"."vis"]\n','["cameras"."vis"]\nbias_dn_rms = inf\n',1)
+                    self.config.write_text(text)
+                else:self.config.write_text(tomlio.toml_text(broken))
+                with self.assertRaisesRegex(ValueError,message):settings.read_settings(self.config)
+
     def test_pose_survives_float32_far_from_origin(self):
         # The renderer rebuilds the view basis in float32 from look_at - position.
         self.settings['scenes'][0].update(target=[-508.6,-117.6,-406.4],radius_m=600.0);self.save()

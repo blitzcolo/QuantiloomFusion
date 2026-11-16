@@ -34,6 +34,14 @@ def vector(v, name):
 # detector states all six. The three parts' variances add.
 PHOTON_LINE_KEYS=("column_gain_sigma","column_offset_e_rms","row_gain_sigma","row_offset_e_rms")
 THERMAL_FPN_KEYS=("fpn_gain_sigma","fpn_offset_k","fpn_column_gain_sigma","fpn_column_offset_k","fpn_row_gain_sigma","fpn_row_offset_k")
+# Optional photon readout keys. Absent, the renderer preset's values apply (and
+# the job is byte-identical to one planned before the keys existed): since
+# Quantiloom 0.10.1 a 64 DN black level for generic_cmos and 256 DN for
+# generic_cooled_photon_ir, no bias pattern. black_level_dn is the ADC pedestal
+# (sensor.readout.black_level_dn); bias_dn_rms is an exposure-independent
+# per-pixel offset pattern in DN (sensor.photon.bias_dn_rms), the place for a
+# datasheet "DSNU" that does not grow with the exposure.
+PHOTON_READOUT_KEYS=("black_level_dn","bias_dn_rms")
 
 
 def fixed_pattern(band,c):
@@ -51,6 +59,20 @@ def fixed_pattern(band,c):
         if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0:
             raise ValueError(f"cameras.{band}.{k} must be a finite number >= 0, got {v!r}")
         if k.endswith("gain_sigma") and v>=1:raise ValueError(f"cameras.{band}.{k} is a relative gain deviation and must be below 1, got {v!r}")
+
+
+def photon_readout(band,c):
+    """Validate the optional PHOTON_READOUT_KEYS of one camera (after adc_bits)."""
+    for k in PHOTON_READOUT_KEYS:
+        if k in c and band=="lwir":raise ValueError(f"cameras.{band}.{k} applies to photon detectors only (vis, mwir); lwir is a thermal detector")
+    if "black_level_dn" in c:
+        v=c["black_level_dn"];full=2**c["adc_bits"]-1
+        if type(v) is not int or not 0<=v<full:
+            raise ValueError(f"cameras.{band}.black_level_dn must be an integer DN in [0, {full}) for a {c['adc_bits']}-bit ADC, got {v!r}")
+    if "bias_dn_rms" in c:
+        v=c["bias_dn_rms"]
+        if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0:
+            raise ValueError(f"cameras.{band}.bias_dn_rms must be a finite number >= 0 (DN), got {v!r}")
 
 
 def read_settings(path):
@@ -85,7 +107,7 @@ def read_settings(path):
     if d["verification"] not in ("hashes","pixels"):raise ValueError("verification must be hashes or pixels")
     if set(doc["cameras"])!=set(BANDS):raise ValueError("exactly vis, mwir, lwir profiles are required")
     for band,c in doc["cameras"].items():
-        check_keys(c,{"resolution","fov_y_deg","pixel_pitch_um","f_number","exposure_s","offset_rdf_m","rotation_ypr_deg","psf_sigma_px","read_noise_e_rms","prnu_sigma","dsnu_e_rms","full_well_e","electrons_per_dn","adc_bits","netd_k","responsivity_dn_w","time_constant_s","warmup_s","distortion","noise_free","apply_nuc","nuc_residual_fraction",*PHOTON_LINE_KEYS,*THERMAL_FPN_KEYS},f"cameras.{band}")
+        check_keys(c,{"resolution","fov_y_deg","pixel_pitch_um","f_number","exposure_s","offset_rdf_m","rotation_ypr_deg","psf_sigma_px","read_noise_e_rms","prnu_sigma","dsnu_e_rms","full_well_e","electrons_per_dn","adc_bits","netd_k","responsivity_dn_w","time_constant_s","warmup_s","distortion","noise_free","apply_nuc","nuc_residual_fraction",*PHOTON_LINE_KEYS,*THERMAL_FPN_KEYS,*PHOTON_READOUT_KEYS},f"cameras.{band}")
         fixed_pattern(band,c)
         if len(c["resolution"])!=2:raise ValueError("resolution requires width,height")
         for x in c["resolution"]:positive(x,"resolution",True)
@@ -101,6 +123,7 @@ def read_settings(path):
             for k in ("full_well_e","electrons_per_dn"):positive(c[k],k)
         if type(c['noise_free']) is not bool:raise ValueError('noise_free must be boolean')
         if type(c['adc_bits']) is not int or not 1<=c["adc_bits"]<=24:raise ValueError("adc_bits must be integer in 1..24")
+        photon_readout(band,c)
     # A coincident rig would violate this generator's experimental contract.
     offsets=[doc["cameras"][b]["offset_rdf_m"] for b in BANDS]
     if any(norm(add(offsets[i],scale(offsets[j],-1)))<1e-5 for i in range(3) for j in range(i)):

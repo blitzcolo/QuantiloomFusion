@@ -41,6 +41,10 @@ with the same command and a finished sample is skipped without loading it.
 ``variants.json`` maps each fingerprint to its spec; ``protocol_summary.csv``
 and ``protocol_summary.md`` are rewritten at the end.
 
+VIS enters as ``vis_input``: ``"raw_adc"`` (linear RGB from RAW over the fixed ADC range) or, for
+the matrix (masked pyramid only) and band_ablation items, ``"display"`` (the fixed sRGB display
+product; see ``VIS_INPUTS``).  The two forms are separate experiments with separate rows.
+
 Noise for ``noise_aware_pyramid`` is built per sample from the camera config
 of each band (``signal.noise``): VIS per mosaic site from its raw electrons
 with the VIS processing chain for the level gains; LWIR from NETD plus the
@@ -111,6 +115,13 @@ ITEMS = ("matrix", "sensitivity", "registration_study", "complementarity", "zero
 REGISTRATIONS = ("oracle", "epipolar_sweep", "infinity_homography", "resize")
 OPERATORS = ("laplacian_pyramid_masked", "noise_aware_pyramid")
 PROTOCOL_VERSION = 1
+# VIS inputs with a fixed, scene-independent mapping (truth references need one).  "display" is the
+# renderer's display product: with auto exposure and auto white balance off it is sRGB_oetf(clip(
+# CCM @ demosaic(WB * corrected / full_well))) -- no image statistic -- for the observation and the
+# co-view reference alike.  It is nonlinear, so the noise model (a linear span) cannot use it: only
+# the items in ``DISPLAY_ITEMS``, and the matrix only with the masked pyramid.
+VIS_INPUTS = ("raw_adc", "display")
+DISPLAY_ITEMS = ("matrix", "band_ablation")
 
 _TOP = {"name", "dataset", "bands", "vis_input", "ir_input", "items", "registration", "operators",
         "levels", "kappa", "fpn", "similarity", "z_min_m", "n_hypotheses", "sensitivity", "registration_study",
@@ -212,8 +223,9 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
     if bands[0] != Band.VIS or len(set(bands)) != len(bands) or len(bands) < 2:
         raise _bad("bands", "expected distinct bands starting with the reference 'vis' and at least one IR band")
     vis_input = data.get("vis_input", "raw_adc")
-    if vis_input not in ("raw_adc",):
-        raise _bad("vis_input", "the noise model and the truth references need 'raw_adc' (a fixed linear window)")
+    if vis_input not in VIS_INPUTS:
+        raise _bad("vis_input", f"expected one of {list(VIS_INPUTS)} (a fixed, scene-independent window), "
+                   f"got {vis_input!r}")
     ir_input = data.get("ir_input", "temperature")
     if ir_input not in ("temperature",):
         raise _bad("ir_input", "the truth references need 'temperature' (a fixed Kelvin window)")
@@ -243,6 +255,13 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
     if type(data.get("fpn", True)) is not bool:
         raise _bad("fpn", "expected true or false")
     items = _choices(data, "items", ITEMS)
+    if vis_input == "display":
+        if set(items) - set(DISPLAY_ITEMS):
+            raise _bad("vis_input", f"'display' is allowed for the items {list(DISPLAY_ITEMS)} only, got "
+                       f"{list(items)}")
+        if "matrix" in items and set(_choices(data, "operators", OPERATORS)) != {"laplacian_pyramid_masked"}:
+            raise _bad("vis_input", "'display' has no linear noise span for noise_aware_pyramid; use operators = "
+                       "[\"laplacian_pyramid_masked\"]")
     if "zeroshot" in items:
         zeroshot = _choices(data, "zeroshot", tuple(ZEROSHOT_MODELS))
         if len(set(zeroshot)) != len(zeroshot):

@@ -64,10 +64,10 @@ def test_config_is_strict(tmp_path):
     with pytest.raises(ValueError, match="unknown_key"):
         load_protocol_config(config)
     config, _ = _setup(tmp_path / "b")
-    config.write_text(config.read_text().replace('"raw_adc"', '"display"'), encoding="utf-8")
+    config.write_text(config.read_text().replace('"raw_adc"', '"raw_percentile"'), encoding="utf-8")
     with pytest.raises(ValueError, match="vis_input"):
         load_protocol_config(config)
-    config.write_text(config.read_text().replace('"display"', '"raw_adc"')
+    config.write_text(config.read_text().replace('"raw_percentile"', '"raw_adc"')
                       + '[registration_study]\nfree_steps = [0]\n', encoding="utf-8")
     with pytest.raises(ValueError, match="free_steps"):
         load_protocol_config(config)
@@ -337,4 +337,57 @@ def test_band_sets_need_the_item_and_configured_bands(tmp_path):
     config.write_text(config.read_text().replace('bands = ["vis", "mwir", "lwir"]', 'bands = ["vis", "lwir"]'),
                       encoding="utf-8")
     with pytest.raises(ValueError, match="band_sets"):
+        load_protocol_config(config)
+
+
+
+# --- VIS display input -----------------------------------------------------------------------
+
+def test_display_input_runs_matrix_and_band_ablation_with_display_luminance(tmp_path):
+    config, out = _ba_setup(tmp_path)
+    config.write_text(config.read_text().replace('"raw_adc"', '"display"'), encoding="utf-8")
+    assert load_protocol_config(config).vis_input == "display"
+    assert run_protocol(config, out_root=out) == 0
+    variants = json.loads((out / "protocol-fixture" / "variants.json").read_text())
+    assert {v["spec"]["vis_input"] for v in variants.values()} == {"display"}
+    rows = _rows(out)
+    # Same specs as raw_adc apart from vis_input, so the two forms never share a fingerprint.
+    raw, out_raw = _ba_setup(tmp_path / "raw")
+    run_protocol(raw, out_root=out_raw)
+    raw_fps = {v["fingerprint"] for v in json.loads((out_raw / "protocol-fixture" / "variants.json").read_text()).values()}
+    assert raw_fps.isdisjoint(v["fingerprint"] for v in variants.values())
+    assert len(rows) == len(_rows(out_raw))
+
+
+def test_display_input_scores_the_display_product(tmp_path):
+    from quantiloom_fusion.core.bands import Band
+    from quantiloom_fusion.dataset.reader import ThreeBandDataset
+    from quantiloom_fusion.experiments.protocol_run import _Sample
+    from quantiloom_fusion.signal.colour import luminance
+    from quantiloom_fusion.signal.normalize import VisDisplay, normalized_input
+
+    config, _ = _ba_setup(tmp_path)
+    config.write_text(config.read_text().replace('"raw_adc"', '"display"'), encoding="utf-8")
+    cfg = load_protocol_config(config)
+    ds = ThreeBandDataset(cfg.dataset)
+    sample = _Sample(ds, ds.sample_ids()[0], cfg)
+    obs = ds.sample(sample.sid)
+    expected = luminance(normalized_input(ds, obs.observations[Band.VIS], VisDisplay()))
+    clean = luminance(normalized_input(ds, obs.references[Band.VIS], VisDisplay()))
+    assert sample.scene.norm["vis"] == "vis_display" and sample.scene.norm["scene_independent"]
+    assert (sample.scene.images[Band.VIS] == expected.astype("float32")).all()
+    assert (sample.scene.clean[Band.VIS] == clean.astype("float32")).all()
+
+
+@pytest.mark.parametrize("items, operators", [
+    ('["sensitivity"]', '["laplacian_pyramid_masked"]'),
+    ('["matrix", "registration_study"]', '["laplacian_pyramid_masked"]'),
+    ('["matrix"]', '["laplacian_pyramid_masked", "noise_aware_pyramid"]'),
+])
+def test_display_input_is_limited_to_matrix_and_band_ablation_with_the_masked_pyramid(tmp_path, items, operators):
+    config, _ = _setup(tmp_path)
+    text = (config.read_text().replace('"raw_adc"', '"display"').replace('items = ["matrix"]', f"items = {items}")
+            .replace('operators = ["laplacian_pyramid_masked"]', f"operators = {operators}"))
+    config.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="vis_input"):
         load_protocol_config(config)

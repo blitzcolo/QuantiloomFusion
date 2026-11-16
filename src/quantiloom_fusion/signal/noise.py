@@ -15,10 +15,18 @@ Fixed pattern (fpn=True) follows the renderer's camera pipeline
 (Quantiloom CpuCameraPipeline): photon detectors have a gain deviation (PRNU
 plus column and row gain) acting on the light that reached the pixel, and an
 offset (DSNU scaled by exposure / dsnu_reference_exposure_s, plus column and
-row offsets); thermal detectors have offsets stated in K (per pixel, column,
-row) and a gain deviation acting on the incident power. In the corrected
-products (corrected, tapp) a two-point NUC leaves nuc_residual_fraction of
-the pattern; rawdn keeps all of it. The column and row parts are counted as
+row offsets) and a bias pattern bias_dn_rms (DN, exposure-independent, gated
+by enable_fpn like the rest); thermal detectors have offsets stated in K (per
+pixel, column, row) and a gain deviation acting on the incident power. In the
+corrected products (corrected, tapp) a two-point NUC leaves
+nuc_residual_fraction of the pattern; rawdn keeps all of it. The bias pattern
+is the exception: the renderer subtracts each pixel's bias exactly when it
+forms the corrected signal (NUC or not), so it is in rawdn only.
+
+Black level: everything here reads the black level the renderer applied (the
+product's camera_config_toml; 64 DN for generic_cmos since Quantiloom 0.10.1,
+0 DN before), never an assumed 0 DN. DN convert to electrons at unit analog
+gain (datagen pins analog_gain = 1). The column and row parts are counted as
 per-pixel variance: exact for the marginal std of one pixel, but a stripe is
 fully correlated along its line, so it is not white across pixels and the
 per-level pyramid gains (computed for white noise pushed through the
@@ -67,6 +75,7 @@ class NoiseConfig:
     column_offset_e_rms: float = 0.0
     row_gain_sigma: float = 0.0
     row_offset_e_rms: float = 0.0
+    bias_dn_rms: float = 0.0  # exposure-independent offset pattern, DN (rawdn only)
     fpn_gain_sigma: float = 0.0
     fpn_offset_k: float = 0.0
     fpn_column_gain_sigma: float = 0.0
@@ -80,7 +89,10 @@ def parse_noise_config(toml_text: str) -> NoiseConfig:
 
     Reads sensor.detector, sensor.exposure.time_s, sensor.readout.{electrons_per_dn,
     black_level_dn}, sensor.photon.{read_noise_e_rms, dark_current_e_s, prnu_sigma,
-    dsnu_e_rms} and sensor.thermal.{netd_k, netd_reference_temperature_k}.
+    dsnu_e_rms} and sensor.thermal.{netd_k, netd_reference_temperature_k}; the
+    fixed-pattern keys (enable_fpn, apply_nuc, nuc_residual_fraction,
+    dsnu_reference_exposure_s, line components, bias_dn_rms) default to off/0
+    when a dataset's config predates them.
     """
     s = tomllib.loads(toml_text)["sensor"]
     ph, th = s["photon"], s["thermal"]
@@ -101,7 +113,7 @@ def parse_noise_config(toml_text: str) -> NoiseConfig:
         nuc_residual_fraction=float(own.get("nuc_residual_fraction", 1.0)),
         dsnu_reference_exposure_s=float(ph.get("dsnu_reference_exposure_s", 0.0)),
         **{k: float(ph.get(k, 0.0)) for k in ("column_gain_sigma", "column_offset_e_rms",
-                                              "row_gain_sigma", "row_offset_e_rms")},
+                                              "row_gain_sigma", "row_offset_e_rms", "bias_dn_rms")},
         **{k: float(th.get(k, 0.0)) for k in ("fpn_gain_sigma", "fpn_offset_k", "fpn_column_gain_sigma",
                                               "fpn_column_offset_k", "fpn_row_gain_sigma", "fpn_row_offset_k")},
     )
@@ -139,7 +151,8 @@ def photon_sigma_e(total_e, cfg: NoiseConfig, fpn: bool = False, product: str = 
     ``product``, the gain deviation sqrt(prnu^2 + column^2 + row^2) times the
     light electrons (total minus the mean dark charge) and the offsets
     sqrt(dsnu_eff^2 + column^2 + row^2), dsnu_eff = dsnu_e_rms * exposure /
-    dsnu_reference_exposure_s.
+    dsnu_reference_exposure_s; in rawdn it also adds the bias pattern
+    bias_dn_rms * electrons_per_dn (removed exactly from corrected products).
     """
     total = np.maximum(np.asarray(total_e, np.float64), 0.0)
     var = total + cfg.read_noise_e_rms**2
@@ -151,6 +164,8 @@ def photon_sigma_e(total_e, cfg: NoiseConfig, fpn: bool = False, product: str = 
         gain2 = cfg.prnu_sigma**2 + cfg.column_gain_sigma**2 + cfg.row_gain_sigma**2
         offset2 = dsnu**2 + cfg.column_offset_e_rms**2 + cfg.row_offset_e_rms**2
         var = var + k**2 * (gain2 * light**2 + offset2)
+        if product not in CORRECTED_PRODUCTS:
+            var = var + (cfg.bias_dn_rms * cfg.electrons_per_dn) ** 2
     return np.sqrt(var)
 
 

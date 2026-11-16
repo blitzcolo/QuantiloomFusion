@@ -23,6 +23,16 @@ from ..dataset.types import CameraGeometry
 from ..geometry.camera import pixel_grid
 
 
+# UMF-CMGR (Wang et al., IJCAI 2022): clone directory under models_dir() and the three author
+# weight files the full test chain needs (CPSTN generator, MRRN registration, DIFN fusion).
+UMF_CMGR_DIR = "UMF-CMGR"
+UMF_CMGR_WEIGHTS = {
+    "cpstn": "CPSTN/checkpoints/pretrained/latest_net_G.pth",
+    "mrrn": "weights/reg_0280.pth",
+    "difn": "weights/fus_0280.pth",
+}
+
+
 def models_dir() -> Path:
     """Root of the third-party model clones: ``QUANTILOOM_ZEROSHOT_MODELS`` or ``<repo>/build/models``."""
     env = os.environ.get("QUANTILOOM_ZEROSHOT_MODELS")
@@ -67,3 +77,39 @@ def lwir_canvas_8bit(lwir: np.ndarray, ref: CameraGeometry, src: CameraGeometry)
     rmap = pure_scale_map(ref, src)
     return cv2.remap(lwir8, rmap[..., 0].astype(np.float32), rmap[..., 1].astype(np.float32),
                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+
+def umf_cmgr_inputs(vis_rgb: np.ndarray, lwir: np.ndarray, ref: CameraGeometry,
+                    src: CameraGeometry) -> dict[str, np.ndarray]:
+    """UMF-CMGR inputs on the native VIS frame, as the authors' test code reads its image files.
+
+    Test/test_reg_fusion.py and dataloader/joint_data.py read every image with
+    ``cv2.IMREAD_GRAYSCALE`` and divide by 255; CPSTN (test.py, single dataset,
+    ``--preprocess none``) reads the visible image as RGB and normalises it to [-1, 1].
+    Here the files are replaced by their 8-bit contents:
+
+    * ``vis_8bit``: (H, W, 3) uint8, the display sRGB image quantised by round(x * 255);
+    * ``cpstn_rgb``: (3, H, W) float32 in [-1, 1], CPSTN's input (x / 255 - 0.5) / 0.5;
+    * ``vi``: (H, W) float32 in [0, 1], BT.601 grey of ``vis_8bit`` (OpenCV's conversion) / 255;
+    * ``ir``: (H, W) float32 in [0, 1], the 8-bit LWIR on the VIS frame by the pure-scale map / 255.
+
+    H and W must be multiples of 4: MRRN halves the frame twice and doubles the flow back, and
+    CPSTN would otherwise resize the image (its make_power_2 rule), which we do not do.
+    """
+    vis = np.asarray(vis_rgb, np.float32)
+    if vis.ndim != 3 or vis.shape[2] != 3:
+        raise ValueError(f"expected a (H, W, 3) display image, got {vis.shape}")
+    h, w = vis.shape[:2]
+    if (w, h) != (ref.width, ref.height):
+        raise ValueError(f"VIS image {w}x{h} does not match its geometry {ref.width}x{ref.height}")
+    if h % 4 or w % 4:
+        raise ValueError(f"UMF-CMGR needs a frame whose sides are multiples of 4, got {w}x{h}")
+    vis8 = quantise_8bit(vis)
+    grey8 = cv2.cvtColor(vis8, cv2.COLOR_RGB2GRAY)
+    ir8 = lwir_canvas_8bit(lwir, ref, src)
+    return {
+        "vis_8bit": vis8,
+        "cpstn_rgb": (vis8.transpose(2, 0, 1).astype(np.float32) / 255.0 - 0.5) / 0.5,
+        "vi": grey8.astype(np.float32) / 255.0,
+        "ir": ir8.astype(np.float32) / 255.0,
+    }

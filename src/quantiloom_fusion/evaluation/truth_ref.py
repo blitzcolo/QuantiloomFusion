@@ -91,12 +91,23 @@ def truth_metrics(fused: np.ndarray, reference: np.ndarray, mask: np.ndarray) ->
 
     ``truth_MSE`` is uncapped (PSNR saturates at its ceiling), so per-layer values
     weighted by pixel counts sum to the MSE over their union.
+
+    ``truth_mean_offset`` = mean(fused - reference) on ``mask``; ``truth_PSNR_demeaned`` is the
+    PSNR after subtracting that offset, i.e. what remains once a global brightness difference on
+    this layer is discounted (a method whose output differs from the reference only by a constant
+    reaches the PSNR ceiling).  Read beside ``truth_PSNR``: a reference rule fixes a brightness
+    convention (the masked pyramid's coarsest level is the band mean) that a method may simply not
+    share.
     """
+    keys = ("truth_MSE", "truth_PSNR", "truth_SSIM", "truth_mean_offset", "truth_PSNR_demeaned")
     if not mask.any():
-        return {"truth_MSE": float("nan"), "truth_PSNR": float("nan"), "truth_SSIM": float("nan")}
-    diff = fused[mask].astype(np.float64) - reference[mask].astype(np.float64)
+        return dict.fromkeys(keys, float("nan"))
+    f, r = fused[mask].astype(np.float64), reference[mask].astype(np.float64)
+    diff = f - r
+    offset = float(np.mean(diff))
     return {"truth_MSE": float(np.mean(diff**2)), "truth_PSNR": psnr(fused[mask], reference[mask]),
-            "truth_SSIM": float(_ssim_map(fused, reference)[mask].mean())}
+            "truth_SSIM": float(_ssim_map(fused, reference)[mask].mean()),
+            "truth_mean_offset": offset, "truth_PSNR_demeaned": psnr(f - offset, r)}
 
 
 def clean_source_metrics(fused: np.ndarray, clean: dict[Band, np.ndarray],

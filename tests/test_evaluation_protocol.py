@@ -36,7 +36,8 @@ from quantiloom_fusion.evaluation.protocol import (
 from quantiloom_fusion.dataset import ThreeBandDataset
 from quantiloom_fusion.evaluation.scene import InputSpec, build_scene, load_scene
 from quantiloom_fusion.evaluation.source_ref import ms_ssim_fusion_n, qabf_n, scd_n
-from quantiloom_fusion.evaluation.truth_ref import TruthMode, clean_input, truth_reference
+from quantiloom_fusion.evaluation.full_ref import PSNR_CEILING_DB
+from quantiloom_fusion.evaluation.truth_ref import TruthMode, clean_input, truth_metrics, truth_reference
 from quantiloom_fusion.fusion import Capabilities, FusionInput, FusionMethod, FusionOutput, create
 from quantiloom_fusion.signal.normalize import IrLinear, IrTemperature, VisDisplay, VisRawLinear
 
@@ -376,3 +377,27 @@ def test_input_spec_rejects_ir_display_and_flags_adaptive_windows():
     assert InputSpec(VisRawLinear(), IrTemperature()).scene_independent
     assert not InputSpec(VisDisplay(), IrLinear()).scene_independent
     assert InputSpec(VisDisplay(), IrLinear(mode="fixed", fixed=(0.0, 100.0))).scene_independent
+
+
+def test_truth_metrics_report_the_mean_offset_and_a_demeaned_psnr():
+    rng = np.random.default_rng(3)
+    ref = rng.uniform(0.2, 0.7, (40, 50))
+    mask = np.zeros(ref.shape, bool)
+    mask[5:30, 10:45] = True
+    # Offset only: exact offset, demeaned PSNR at the ceiling, plain PSNR = -20 log10(offset).
+    m = truth_metrics(ref + 0.125, ref, mask)
+    assert m["truth_mean_offset"] == pytest.approx(0.125, abs=1e-12)
+    assert m["truth_PSNR_demeaned"] == PSNR_CEILING_DB
+    assert m["truth_PSNR"] == pytest.approx(-20 * np.log10(0.125), abs=1e-9)
+    # Offset plus zero-mean noise on the mask: the offset is recovered exactly, the demeaned PSNR is
+    # that of the noise alone; pixels outside the mask do not count.
+    noise = rng.normal(0.0, 0.01, ref.shape)
+    noise[mask] -= noise[mask].mean()
+    fused = ref - 0.05 + noise
+    fused[~mask] = 0.0
+    m = truth_metrics(fused, ref, mask)
+    assert m["truth_mean_offset"] == pytest.approx(-0.05, abs=1e-12)
+    assert m["truth_PSNR_demeaned"] == pytest.approx(10 * np.log10(1 / np.mean(noise[mask] ** 2)), abs=1e-9)
+    assert m["truth_PSNR"] < m["truth_PSNR_demeaned"]
+    empty = truth_metrics(fused, ref, np.zeros(ref.shape, bool))
+    assert np.isnan(empty["truth_mean_offset"]) and np.isnan(empty["truth_PSNR_demeaned"])

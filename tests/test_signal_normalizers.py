@@ -8,6 +8,7 @@ from quantiloom_fusion.dataset import (
     CameraGeometry,
     Observation,
     Product,
+    Readout,
     SignalSemantics,
     ThreeBandDataset,
 )
@@ -67,6 +68,27 @@ def test_vis_raw_linear_subtracts_the_black_level_the_renderer_applied(tmp_path)
     p = VisRawLinear(scale="percentile")
     normalized_input(ds, obs, p)
     assert p.params()["scale_value"] == pytest.approx(506.0)  # as without the pedestal
+
+
+def test_vis_raw_linear_keeps_sub_black_noise_so_a_dim_frame_stays_unbiased():
+    # A low-light RGGB frame on a 64 DN pedestal: 0.5 DN of signal under 1.2 DN of noise, so a
+    # fifth of the sites read below the black level. Their negative values must survive.
+    readout = Readout(cfa="rggb", adc_bits=12, black_level_dn=64.0, electrons_per_dn=5.0, exposure_s=1.0,
+                      white_balance=(1.0, 1.0, 1.0), device_to_linear_srgb=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+    sig = SignalSemantics(kind="raw_dn", unit="DN", transfer="linear", cfa="1", channels=("Raw",),
+                          colour_space="device_native", storage="float32")
+    obs = Observation(band=Band.VIS, geometry=CameraGeometry(**GEO_KWARGS), readout=readout, spectral_mode="m",
+                      products={"rawdn": Product("rawdn", "f.exr", sig)}, record="r")
+    rng = np.random.default_rng(20261116)
+    signal_dn, h, w = 0.5, 256, 256
+    raw = np.floor(64.0 + signal_dn + 1.2 * rng.standard_normal((h, w)) + 0.5).astype(np.float32)
+    assert np.mean(raw < 64.0) > 0.15
+    n = VisRawLinear(scale="adc")
+    out = n(raw, obs).astype(np.float64)[4:-4, 4:-4] * n.params()["scale_value"]  # back to DN
+    assert out.min() < -2.0 and out.max() <= 4031.0
+    assert out.mean() == pytest.approx(signal_dn, abs=0.02)
+    # Clipping at 0 (the previous behaviour) reads the dim frame about 25 % high.
+    assert np.maximum(out, 0.0).mean() > signal_dn + 0.08
 
 
 def test_vis_raw_linear_percentile(dataset):

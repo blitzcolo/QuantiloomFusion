@@ -79,6 +79,12 @@ class VisRawLinear:
     scale "adc" divides by the fixed full range (2**adc_bits - 1 - black),
     comparable across samples and conditions; "percentile" divides by the
     given luminance percentile of this image alone.
+
+    The result is clipped at 1 only. Values below the black level stay
+    negative: the renderer's pedestal (64 DN for generic_cmos since Quantiloom
+    0.10.1) exists so that a dark pixel's negative read-noise excursions are
+    kept, and clipping them at 0 here would bias a dim pixel's mean up and its
+    variance down exactly where the noise model (signal.noise) is asked about.
     """
 
     name = "vis_raw_linear"
@@ -115,7 +121,7 @@ class VisRawLinear:
             if not np.isfinite(denom) or denom <= 0:
                 denom = 1.0
         self._applied = {"black_level_dn": r.black_level_dn, "scale_value": denom}
-        return np.clip(rgb / denom, 0.0, 1.0).astype(np.float32)
+        return np.minimum(rgb / denom, 1.0).astype(np.float32)
 
 
 class IrLinear:

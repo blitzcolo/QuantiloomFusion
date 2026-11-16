@@ -225,7 +225,9 @@ def _fuse_masked(x: FusionInput, requested_levels: int, kappa: float | None,
               "sigma_level": {b: [float(np.median(a)) for a in sl] for b, sl in zip(bands, sigma_levels)},
               "fused_detail": fused, "gain_model": gain_model if sigmas is not None else None,
               "level_gain": {b: list(g) for b, g in band_gains.items()}}
-    return FusionOutput(np.clip(out, 0.0, 1.0).astype(np.float32), extras)
+    # Clipped at 1 only: a dim VIS RAW input carries noise below 0 (VisRawLinear keeps the
+    # sub-black side), and clipping the fused image at 0 would rectify it again.
+    return FusionOutput(np.minimum(out, 1.0).astype(np.float32), extras)
 
 
 @register("laplacian_pyramid_masked")

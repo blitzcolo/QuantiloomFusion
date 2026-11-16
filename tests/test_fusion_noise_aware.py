@@ -70,8 +70,24 @@ def test_full_masks_and_zero_sigma_equal_standard_pyramid():
     std = _fuse("laplacian_pyramid", vis, ir, levels=LEVELS).image
     aware = _noise_aware(vis, ir, 0.0).image
     masked = _fuse("laplacian_pyramid_masked", vis, ir, levels=LEVELS).image
-    np.testing.assert_allclose(aware, std, atol=1e-6)
-    np.testing.assert_allclose(masked, std, atol=1e-6)
+    # The masked operators clip at 1 only (a dim RAW input keeps its sub-black noise);
+    # the standard pyramid, a paper-exp port, also clips at 0.
+    assert aware.min() < 0.0 and masked.min() < 0.0
+    np.testing.assert_allclose(np.maximum(aware, 0.0), std, atol=1e-6)
+    np.testing.assert_allclose(np.maximum(masked, 0.0), std, atol=1e-6)
+
+
+@pytest.mark.parametrize("name", ["laplacian_pyramid_masked", "noise_aware_pyramid"])
+def test_dim_input_below_zero_passes_through_unrectified(name):
+    # A dim VIS RAW input (VisRawLinear keeps the sub-black side) with no IR support anywhere:
+    # the fused image is the VIS image itself, negative values and mean included.
+    rng = np.random.default_rng(5)
+    vis = (2e-4 + 1e-3 * rng.standard_normal((H, W))).astype(np.float32)
+    cfg = {"sigma": {Band.VIS: 0.0, Band.LWIR: 0.0}, "gain_model": "white"} if name == "noise_aware_pyramid" else {}
+    out = _fuse(name, vis, _textured(6), np.zeros((H, W), bool), levels=LEVELS, **cfg).image
+    assert out.min() < 0.0
+    np.testing.assert_allclose(out, vis, atol=1e-6)
+    assert out.mean() == pytest.approx(vis.mean(), abs=1e-7)
 
 
 def test_selection_compares_shrunk_magnitudes_not_snr():

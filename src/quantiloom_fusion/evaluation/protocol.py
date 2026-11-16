@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import enum
 import math
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from ..core.bands import Band
 from ..fusion import FusionInput, FusionMethod, aligned_sources
 from ..geometry.warp import Warp
 from ..registration.base import registration_error
+from ..signal.colour import luminance
 from .layer_report import FusedView, layer_masks, layer_metrics
 from .perturb import inverse_depth_bias_warp, smooth_field_warp
 from .scene import EvalScene
@@ -100,6 +102,51 @@ def evaluate_point(scene: EvalScene, operator: FusionMethod, warps: dict[Band, W
             if truth_mode == TruthMode.FUSION:
                 row |= clean_source_metrics(fused, scene.clean, mask)
         rows.append(row)
+    return rows
+
+
+def evaluate_zeroshot(scene: EvalScene, vis_rgb: np.ndarray, method: FusionMethod) -> list[dict]:
+    """A zero-shot model on the raw unregistered pair, scored in the FUSION truth mode.
+
+    The model gets the reference band as the RGB image ``vis_rgb`` (display) and every source band
+    as ``scene.images`` (native grid, normalised); it aligns them itself and must report the warp
+    it applied per source band in ``extras["warps"]`` (reference grid -> native source pixels).
+    Its output (RGB is scored as BT.601 luminance) is scored like a matrix row: the same layer
+    groups, the common baseline rule on the clean co-view images as truth reference, the
+    clean-source metrics, and -- through the sources aligned with the model's own warps -- the
+    source-referenced metrics and the occluded / out-of-view high-pass deviation from the
+    reference band.  EPE of the model's warp against the oracle, its own runtime (``runtime_s``,
+    as the model reports it) and the wall time of the fuse call (``fuse_wall_s``) are added.
+    """
+    if scene.clean is None:
+        raise ValueError(f"{scene.sample_id} has no co-view clean images; the zero-shot item needs them")
+    if not scene.norm.get("scene_independent", True):
+        raise ValueError("truth-referenced metrics need a fixed normalisation window")
+    ref = scene.reference
+    sources = [b for b in scene.images if b != ref]
+    t0 = time.perf_counter()
+    out = method.fuse(FusionInput(ref, {ref: vis_rgb, **{b: scene.images[b] for b in sources}}, scene.geometry))
+    wall = time.perf_counter() - t0
+    fused = np.asarray(out.image, np.float32)
+    if fused.ndim == 3:
+        fused = luminance(fused).astype(np.float32)
+    if fused.shape != scene.images[ref].shape[:2]:
+        raise ValueError(f"{method.name}: output {fused.shape} is not on the reference grid "
+                         f"{scene.images[ref].shape[:2]}")
+    warps = out.extras.get("warps") or {}
+    if set(sources) - set(warps):
+        raise ValueError(f"{method.name} reported no warp for {sorted(set(sources) - set(warps))}")
+    x = FusionInput(ref, scene.images, scene.geometry, {b: warps[b] for b in sources})
+    aligned, supports = aligned_sources(x)
+    view = FusedView(fused, aligned, supports, ref)
+    reference, rule = truth_reference(TruthMode.FUSION, method, clean_input(scene.clean, scene.geometry, ref))
+    extra = epe_columns(scene, x.warps) | {"runtime_s": float(out.extras.get("runtime_s", float("nan"))),
+                                           "fuse_wall_s": wall, "calibrated": 0.0}
+    rows = []
+    for group, mask in layer_masks(scene.layers).items():
+        rows.append({"operator": method.name, "truth_mode": TruthMode.FUSION.value, "truth_rule": rule}
+                    | scene.norm_columns() | layer_metrics(view, group, mask)
+                    | truth_metrics(fused, reference, mask) | clean_source_metrics(fused, scene.clean, mask) | extra)
     return rows
 
 

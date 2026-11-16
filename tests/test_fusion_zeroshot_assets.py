@@ -5,8 +5,11 @@ import pytest
 
 from quantiloom_fusion.dataset.types import CameraGeometry
 from quantiloom_fusion.fusion.zeroshot_assets import (
+    ZEROSHOT_MODELS,
     canvas_to_native,
     file_sha256,
+    git_head,
+    model_identity,
     lwir_canvas_8bit,
     pure_scale_map,
     quantise_8bit,
@@ -74,3 +77,38 @@ def test_file_sha256_matches_hashlib(tmp_path):
     p = tmp_path / "w.pth"
     p.write_bytes(b"x" * 3_000_000)
     assert file_sha256(p) == hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def test_model_identity_hashes_every_weight_file_and_reads_the_clone_commit(tmp_path, monkeypatch):
+    import hashlib
+
+    monkeypatch.setenv("QUANTILOOM_ZEROSHOT_MODELS", str(tmp_path))
+    root = tmp_path / ZEROSHOT_MODELS["umf_cmgr"].code_dir
+    for i, rel in enumerate(ZEROSHOT_MODELS["umf_cmgr"].weights):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(bytes([i]) * 10)
+    (root / ".git" / "refs" / "heads").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (root / ".git" / "refs" / "heads" / "main").write_text("b54a82ee" + "0" * 32 + "\n")
+    ident = model_identity("umf_cmgr")
+    assert ident["model"] == "umf_cmgr" and ident["code_commit"].startswith("b54a82ee")
+    hashes = dict(item.split("=") for item in ident["weights_sha256"].split(";"))
+    assert list(hashes) == list(ZEROSHOT_MODELS["umf_cmgr"].weights)
+    assert hashes["weights/reg_0280.pth"] == hashlib.sha256(bytes([1]) * 10).hexdigest()
+    assert ident["preprocessing"].startswith("umf-cmgr-v1")
+    (root / "weights" / "fus_0280.pth").unlink()
+    with pytest.raises(FileNotFoundError, match="fus_0280"):
+        model_identity("umf_cmgr")
+    with pytest.raises(KeyError):
+        model_identity("rfnet")
+
+
+def test_git_head_reads_packed_refs_and_detached_heads(tmp_path):
+    git = tmp_path / ".git"
+    git.mkdir()
+    (git / "HEAD").write_text("ref: refs/heads/main\n")
+    (git / "packed-refs").write_text("# pack-refs\nabc123 refs/heads/main\n")
+    assert git_head(tmp_path) == "abc123"
+    (git / "HEAD").write_text("def456\n")
+    assert git_head(tmp_path) == "def456"
+    assert git_head(tmp_path / "nothing") == "unknown"

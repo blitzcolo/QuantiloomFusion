@@ -154,3 +154,114 @@ def test_an_empty_free_step_list_skips_the_free_search_control(tmp_path):
     assert cfg.registration_study.free_steps == ()
     methods = [m for m, *_ in _Run.study_methods(type("R", (), {"cfg": cfg})())]
     assert "free_search" not in methods and "epipolar_sweep" in methods
+
+
+
+# --- zeroshot item ---------------------------------------------------------------------------
+
+ZS_ITEMS = 'items = ["zeroshot"]\nzeroshot = ["umf_cmgr"]\n'
+
+
+def _zs_setup(tmp_path, samples=2):
+    root = build_fixture(tmp_path / "ds", samples=samples, size=(32, 24), references=True)
+    config = tmp_path / "protocol.toml"
+    config.write_text(CONFIG.format(dataset=root.as_posix()).replace('items = ["matrix"]\n', ZS_ITEMS),
+                      encoding="utf-8")
+    return config, tmp_path / "out"
+
+
+def _fake_zeroshot_method():
+    """A stand-in model (no torch): grey VIS out, the pure-scale map as its own warp."""
+    from quantiloom_fusion.core.bands import Band
+    from quantiloom_fusion.fusion.base import Capabilities, FusionMethod, FusionOutput
+    from quantiloom_fusion.fusion.zeroshot_assets import pure_scale_map
+    from quantiloom_fusion.geometry.warp import Warp
+    from quantiloom_fusion.signal.colour import luminance
+
+    class Fake(FusionMethod):
+        name = "fake_zeroshot"
+        capabilities = Capabilities(frozenset({Band.VIS, Band.LWIR}), False, True, False, False)
+
+        def fuse(self, x):
+            gv, gl = x.geometry[Band.VIS], x.geometry[Band.LWIR]
+            m = pure_scale_map(gv, gl)
+            valid = (m[..., 0] >= 0) & (m[..., 0] <= gl.width - 1) & (m[..., 1] >= 0) & (m[..., 1] <= gl.height - 1)
+            assert x.images[Band.VIS].ndim == 3 and x.warps is None  # display RGB, raw pair
+            return FusionOutput(luminance(x.images[Band.VIS]).astype("float32"),
+                                {"warps": {Band.LWIR: Warp(Band.VIS, Band.LWIR, m, valid, {})}, "runtime_s": 0.25})
+
+    return Fake()
+
+
+IDENTITY = {"model": "umf_cmgr", "code_commit": "b54a82e", "preprocessing": "umf-cmgr-v1: test",
+            "weights_sha256": "CPSTN/x.pth=aa;weights/reg_0280.pth=bb;weights/fus_0280.pth=cc"}
+
+
+def test_zeroshot_config_needs_known_models_the_item_and_lwir(tmp_path):
+    config, _ = _zs_setup(tmp_path)
+    assert load_protocol_config(config).zeroshot == ("umf_cmgr",)
+    text = config.read_text(encoding="utf-8")
+    for bad, match in ((text.replace('zeroshot = ["umf_cmgr"]', 'zeroshot = ["rfnet"]'), "zeroshot"),
+                       (text.replace('zeroshot = ["umf_cmgr"]\n', ""), "zeroshot"),
+                       (text.replace('zeroshot = ["umf_cmgr"]', 'zeroshot = ["umf_cmgr", "umf_cmgr"]'), "duplicate"),
+                       (text.replace('items = ["zeroshot"]', 'items = ["matrix"]'), "not in items"),
+                       (text.replace('bands = ["vis", "lwir"]', 'bands = ["vis", "mwir"]'), "lwir")):
+        config.write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match=match):
+            load_protocol_config(config)
+
+
+def test_zeroshot_rows_carry_model_identity_input_domain_and_an_anchor(tmp_path, monkeypatch):
+    import quantiloom_fusion.experiments.protocol_run as pr
+
+    monkeypatch.setattr(pr, "model_identity", lambda name: dict(IDENTITY))
+    monkeypatch.setattr(pr, "_zeroshot_method", lambda name: _fake_zeroshot_method())
+    config, out = _zs_setup(tmp_path)
+    assert run_protocol(config, out_root=out) == 0
+    rows = _rows(out)
+    assert len(rows) == 2 * 2 * len(REPORT_GROUPS)  # 2 samples x (model + anchor) x groups
+    variants = json.loads((out / "protocol-fixture" / "variants.json").read_text())
+    specs = {v["spec"]["model"]: v["spec"] for v in variants.values()}
+    assert set(specs) == {"umf_cmgr", "anchor"}
+    model, anchor = specs["umf_cmgr"], specs["anchor"]
+    assert model["weights_sha256"] == IDENTITY["weights_sha256"] and model["code_commit"] == "b54a82e"
+    assert model["registration"] == "model_own" and anchor["registration"] == "oracle"
+    assert anchor["operator"] == "laplacian_pyramid_masked"
+    for spec in (model, anchor):
+        assert spec["truth_mode"] == "fusion_operator" and spec["truth_rule"] == "laplacian_pyramid_masked"
+        assert spec["input_domain"] == "vis_display+lwir_temperature_260-340K"
+        assert spec["vis_input"] == "display" and spec["ir_window_k"] == [260.0, 340.0]
+        assert spec["bands"] == ["vis", "lwir"]
+    fp = {v["spec"]["model"]: v["fingerprint"] for v in variants.values()}
+    model_rows = [v for k, v in rows.items() if k.method_fingerprint == fp["umf_cmgr"]]
+    assert all(v["runtime_s"] == 0.25 and "truth_PSNR" in v and "epe_mean_px" in v for v in model_rows)
+    assert any("hp_dev_RMSE" in v for v in model_rows)
+    assert "| umf_cmgr | model_own |" in (out / "protocol-fixture" / "protocol_summary.md").read_text()
+    # Changed weights are a new variant, not a resumed one.
+    monkeypatch.setattr(pr, "model_identity", lambda name: IDENTITY | {"weights_sha256": "changed"})
+    run_protocol(config, out_root=out)
+    assert len(_rows(out)) == 2 * 3 * len(REPORT_GROUPS)
+
+
+def test_zeroshot_without_weights_writes_error_rows_and_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTILOOM_ZEROSHOT_MODELS", str(tmp_path / "no-models"))
+    config, out = _zs_setup(tmp_path)
+    assert run_protocol(config, out_root=out) == 1
+    errors = [json.loads(line) for line in (out / "protocol-fixture" / "errors.jsonl").read_text().splitlines()]
+    assert len(errors) == 2 and all("FileNotFoundError" in e["error"] and "umf_cmgr" in e["label"] for e in errors)
+    assert len(_rows(out)) == 2 * len(REPORT_GROUPS)  # the anchor still ran
+    assert run_protocol(config, out_root=out) == 1  # retried, still failing loudly
+
+
+def test_zeroshot_without_torch_writes_error_rows_and_fails(tmp_path, monkeypatch):
+    import quantiloom_fusion.experiments.protocol_run as pr
+
+    def no_torch(name):
+        raise ImportError("No module named 'torch'")
+
+    monkeypatch.setattr(pr, "model_identity", lambda name: dict(IDENTITY))
+    monkeypatch.setattr(pr, "_zeroshot_method", no_torch)
+    config, out = _zs_setup(tmp_path, samples=1)
+    assert run_protocol(config, out_root=out) == 1
+    errors = [json.loads(line) for line in (out / "protocol-fixture" / "errors.jsonl").read_text().splitlines()]
+    assert len(errors) == 1 and "torch" in errors[0]["error"] and errors[0]["fingerprint"]

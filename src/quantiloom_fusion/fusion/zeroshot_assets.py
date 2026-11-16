@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -30,6 +31,30 @@ UMF_CMGR_WEIGHTS = {
     "cpstn": "CPSTN/checkpoints/pretrained/latest_net_G.pth",
     "mrrn": "weights/reg_0280.pth",
     "difn": "weights/fus_0280.pth",
+}
+
+
+
+@dataclass(frozen=True)
+class ZeroShotModel:
+    """A registered zero-shot model's clone directory (under models_dir()), author weight files
+    (relative to the clone) and a tag of our input preparation (bump it when that changes)."""
+
+    code_dir: str
+    weights: tuple[str, ...]
+    preprocessing: str
+
+
+_SUPERFUSION_PREP = ("superfusion-v1: VIS display sRGB round(x*255) as RGB; LWIR window round(x*255), "
+                     "pure-scale bilinear onto the VIS frame, grey to 3 channels; output RGB, scored as BT.601 Y")
+ZEROSHOT_MODELS: dict[str, ZeroShotModel] = {
+    "superfusion_msrs": ZeroShotModel("SuperFusion", ("checkpoint/MSRS.pth",), _SUPERFUSION_PREP),
+    "superfusion_roadscene": ZeroShotModel("SuperFusion", ("checkpoint/RoadScene.pth",), _SUPERFUSION_PREP),
+    "umf_cmgr": ZeroShotModel(
+        UMF_CMGR_DIR, tuple(UMF_CMGR_WEIGHTS.values()),
+        "umf-cmgr-v1: native VIS frame; CPSTN on VIS display round(x*255) in [-1,1], pseudo-IR truncated to "
+        "8 bit; MRRN(pseudo-IR, LWIR window round(x*255) pure-scale onto the VIS frame); DIFN(registered "
+        "LWIR, BT.601 grey of the 8-bit VIS); output clipped to [0,1]"),
 }
 
 
@@ -113,3 +138,46 @@ def umf_cmgr_inputs(vis_rgb: np.ndarray, lwir: np.ndarray, ref: CameraGeometry,
         "vi": grey8.astype(np.float32) / 255.0,
         "ir": ir8.astype(np.float32) / 255.0,
     }
+
+
+def git_head(repo: Path) -> str:
+    """Commit checked out in a clone, read from its .git directory (no git process): HEAD, the loose
+    ref it names, or packed-refs; "unknown" when the clone has no readable .git."""
+    git = Path(repo) / ".git"
+    try:
+        head = (git / "HEAD").read_text(encoding="ascii").strip()
+    except OSError:
+        return "unknown"
+    if not head.startswith("ref: "):
+        return head
+    ref = head[5:]
+    loose = git / ref
+    if loose.is_file():
+        return loose.read_text(encoding="ascii").strip()
+    packed = git / "packed-refs"
+    if packed.is_file():
+        for line in packed.read_text(encoding="ascii").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == ref:
+                return parts[0]
+    return "unknown"
+
+
+def model_identity(name: str) -> dict[str, str]:
+    """What identifies a zero-shot model's results: name, clone commit, SHA-256 of every author
+    weight file (``relpath=sha256`` joined by ";") and the preprocessing tag.
+
+    Raises KeyError for an unknown name and FileNotFoundError when the clone or a weight file is
+    missing, so a run without the assets fails loudly instead of skipping the model.
+    """
+    try:
+        model = ZEROSHOT_MODELS[name]
+    except KeyError:
+        raise KeyError(f"unknown zero-shot model {name!r}; known: {sorted(ZEROSHOT_MODELS)}") from None
+    root = models_dir() / model.code_dir
+    missing = [rel for rel in model.weights if not (root / rel).is_file()]
+    if missing:
+        raise FileNotFoundError(f"{name}: author weights missing under {root}: {missing}")
+    return {"model": name, "code_commit": git_head(root),
+            "weights_sha256": ";".join(f"{rel}={file_sha256(root / rel)}" for rel in model.weights),
+            "preprocessing": model.preprocessing}

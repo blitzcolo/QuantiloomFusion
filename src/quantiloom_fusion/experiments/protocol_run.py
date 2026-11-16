@@ -13,6 +13,19 @@ Four items, each switched on in the config's ``items`` list:
   similarity and grid step, on the correspondable and the edge layer.
 * ``complementarity``: ``evaluation.complementarity`` on the whole dataset,
   written once as a Markdown report.
+* ``zeroshot``: the public deep models named in the config key ``zeroshot``
+  (``fusion.zeroshot``, author weights) on the raw unregistered VIS + LWIR
+  pair of every sample with co-view references -- native resolutions, the
+  model's own alignment, never our warps -- scored by
+  ``evaluation.protocol.evaluate_zeroshot`` in the FUSION truth mode.  The
+  models take the VIS display image and LWIR through the protocol's fixed
+  temperature window, so the truth reference is built from the clean co-view
+  images in that same domain, and an anchor (``laplacian_pyramid_masked`` on
+  the oracle warps, same domain and reference) is scored beside them.  The
+  spec names the model, its clone commit and the SHA-256 of every weight file,
+  so changed weights are new rows.  A model whose weights or torch are missing
+  gets an error line in ``errors.jsonl`` per sample (retried next run) and
+  makes the run exit 1; it is never skipped silently.
 
 Rows go to ``build/experiments/<name>/results.jsonl`` (``evaluation.base.
 ResultStore``): one row per (sample, variant, layer group) for the layered
@@ -60,13 +73,15 @@ from ..evaluation.protocol import (
     Sweep,
     epe_columns,
     evaluate_point,
+    evaluate_zeroshot,
     inflation_experiment,
     is_calibrated,
     sensitivity_curve,
 )
 from ..evaluation.scene import EvalScene, InputSpec, load_scene
-from ..evaluation.truth_ref import TruthMode
+from ..evaluation.truth_ref import BASELINE_RULE, TruthMode
 from ..fusion.registry import create
+from ..fusion.zeroshot_assets import ZEROSHOT_MODELS, model_identity
 from ..geometry.layers import Layer, layer_map
 from ..geometry.warp import Warp, apply_warp
 from ..registration import (
@@ -80,17 +95,18 @@ from ..registration import (
 )
 from ..signal.colour import luminance
 from ..signal.noise import band_sigma, electrons_from_raw, estimate_dsdt, sample_noise_config, vis_luminance_chain
-from ..signal.normalize import IrLinear, IrTemperature, VisRawLinear, normalized_input
+from ..signal.normalize import IrLinear, IrTemperature, VisDisplay, VisRawLinear, normalized_input
+from .driver import _ErrorLog
 from .variants import fingerprint, ir_normalizer, vis_normalizer
 
-ITEMS = ("matrix", "sensitivity", "registration_study", "complementarity")
+ITEMS = ("matrix", "sensitivity", "registration_study", "complementarity", "zeroshot")
 REGISTRATIONS = ("oracle", "epipolar_sweep", "infinity_homography", "resize")
 OPERATORS = ("laplacian_pyramid_masked", "noise_aware_pyramid")
 PROTOCOL_VERSION = 1
 
 _TOP = {"name", "dataset", "bands", "vis_input", "ir_input", "items", "registration", "operators",
         "levels", "kappa", "fpn", "similarity", "z_min_m", "n_hypotheses", "sensitivity", "registration_study",
-        "complementarity"}
+        "complementarity", "zeroshot"}
 _SENS = {"bias", "field", "corr_len_px", "seed", "inflation", "operators", "truth_modes"}
 _STUDY = {"similarities", "free_steps"}
 _COMP = {"view_group_blocks"}
@@ -132,6 +148,7 @@ class ProtocolConfig:
     sensitivity: SensitivitySpec = field(default_factory=SensitivitySpec)
     registration_study: StudySpec = field(default_factory=StudySpec)
     view_group_blocks: int | None = None
+    zeroshot: tuple[str, ...] = ()  # registered zero-shot model names (item "zeroshot")
 
     @property
     def reference(self) -> Band:
@@ -216,12 +233,23 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
         raise _bad("n_hypotheses", f"expected an integer >= 2, got {n_hyp!r}")
     if type(data.get("fpn", True)) is not bool:
         raise _bad("fpn", "expected true or false")
+    items = _choices(data, "items", ITEMS)
+    if "zeroshot" in items:
+        zeroshot = _choices(data, "zeroshot", tuple(ZEROSHOT_MODELS))
+        if len(set(zeroshot)) != len(zeroshot):
+            raise _bad("zeroshot", f"duplicate model names in {list(zeroshot)}")
+        if Band.LWIR not in bands:
+            raise _bad("bands", "the zeroshot item fuses VIS + LWIR; 'lwir' must be among the bands")
+    elif "zeroshot" in data:
+        raise _bad("zeroshot", "models are listed but 'zeroshot' is not in items")
+    else:
+        zeroshot = ()
     blocks = comp.get("view_group_blocks")
     if blocks is not None and (type(blocks) is not int or blocks < 2):
         raise _bad("complementarity.view_group_blocks", f"expected an integer >= 2, got {blocks!r}")
     return ProtocolConfig(
         name=data["name"], dataset=data["dataset"], bands=bands, vis_input=vis_input, ir_input=ir_input,
-        items=_choices(data, "items", ITEMS), registration=_choices(data, "registration", REGISTRATIONS),
+        items=items, registration=_choices(data, "registration", REGISTRATIONS),
         operators=_choices(data, "operators", OPERATORS), levels=levels, kappa=float(kappa),
         fpn=data.get("fpn", True), similarity=similarity, z_min_m=float(z_min), n_hypotheses=n_hyp,
         sensitivity=SensitivitySpec(
@@ -237,7 +265,7 @@ def load_protocol_config(path: Path) -> ProtocolConfig:
             similarities=_choices(study, "similarities", tuple(str(s) for s in Similarity))
             if "similarities" in study else StudySpec.similarities,
             free_steps=tuple(s if s == "sweep" else float(s) for s in steps)),
-        view_group_blocks=blocks,
+        view_group_blocks=blocks, zeroshot=zeroshot,
     )
 
 
@@ -253,6 +281,7 @@ class _Sample:
         self._warps: dict[str, dict[Band, Warp]] = {}
         self._noise: dict | None = None
         self._reg_inputs: dict[Band, np.ndarray] = {}
+        self._zs_scene: EvalScene | None = None
 
     @property
     def has_references(self) -> bool:
@@ -264,6 +293,19 @@ class _Sample:
             spec = InputSpec(vis_normalizer(self.cfg.vis_input), ir_normalizer(self.cfg.ir_input))
             self._scene = load_scene(self.ds, self.sid, spec, self.cfg.bands)
         return self._scene
+
+    @property
+    def zeroshot_scene(self) -> EvalScene:
+        """VIS + LWIR in the zero-shot input domain: VIS display luminance, LWIR through the
+        protocol's fixed temperature window; clean co-view images in the same domain."""
+        if self._zs_scene is None:
+            spec = InputSpec(VisDisplay(), ir_normalizer(self.cfg.ir_input))
+            self._zs_scene = load_scene(self.ds, self.sid, spec, (Band.VIS, Band.LWIR))
+        return self._zs_scene
+
+    def vis_display_rgb(self) -> np.ndarray:
+        """The VIS display image as RGB in [0, 1] (what the zero-shot models are given)."""
+        return normalized_input(self.ds, self.sample.observations[Band.VIS], VisDisplay())
 
     def reg_input(self, band: Band) -> np.ndarray:
         """Inputs the sweep's gates were tuned on (percentile scales)."""
@@ -370,11 +412,45 @@ def _layer_metric(group: str) -> str:
 _GROUPS = REPORT_GROUPS
 
 
+def _zeroshot_method(name: str):
+    """Instantiate a zero-shot model; importing fusion.zeroshot needs torch (ImportError without)."""
+    from ..fusion import zeroshot  # noqa: F401  (registers the models)
+
+    return create(name)
+
+
+def zeroshot_input_domain(cfg: ProtocolConfig) -> str:
+    """Name of the zero-shot input domain, e.g. ``vis_display+lwir_temperature_260-340K``."""
+    lo, hi = ir_normalizer(cfg.ir_input).window_k
+    return f"vis_display+lwir_{cfg.ir_input}_{lo:g}-{hi:g}K"
+
+
+def zeroshot_base_spec(cfg: ProtocolConfig) -> dict:
+    """Spec keys shared by every zero-shot row (models and anchor): the input domain and the truth mode."""
+    return {"bands": [str(Band.VIS), str(Band.LWIR)], "vis_input": "display", "ir_input": cfg.ir_input,
+            "ir_window_k": list(ir_normalizer(cfg.ir_input).window_k), "input_domain": zeroshot_input_domain(cfg),
+            "item": "zeroshot", "truth_mode": TruthMode.FUSION.value, "truth_rule": BASELINE_RULE}
+
+
+def zeroshot_anchor_spec(cfg: ProtocolConfig) -> dict:
+    return zeroshot_base_spec(cfg) | {"model": "anchor", "registration": "oracle"} | \
+        _operator_spec(cfg, "laplacian_pyramid_masked")
+
+
+def zeroshot_model_spec(cfg: ProtocolConfig, identity: dict[str, str]) -> dict:
+    """``identity`` from ``fusion.zeroshot_assets.model_identity``: model, code commit, weight hashes."""
+    return zeroshot_base_spec(cfg) | {"registration": "model_own"} | identity
+
+
 class _Run:
-    def __init__(self, cfg: ProtocolConfig, dataset: ThreeBandDataset, store: ResultStore, out_dir: Path):
+    def __init__(self, cfg: ProtocolConfig, dataset: ThreeBandDataset, store: ResultStore, out_dir: Path,
+                 error_log: _ErrorLog | None = None):
         self.cfg, self.ds, self.store, self.out_dir = cfg, dataset, store, out_dir
         self.variants: dict[str, dict] = {}
         self.errors = 0
+        self.error_log = error_log
+        self._zs_identity: dict[str, dict[str, str]] = {}
+        self._zs_methods: dict = {}
 
     def key(self, sid: str, spec: dict, metric: str) -> ResultKey:
         fp = fingerprint(spec)
@@ -480,6 +556,43 @@ class _Run:
                     values["confident_fraction"] = float(warp.provenance["confident"][oracle.valid].mean())
                 self.put(sample.sid, spec, "epe", values)
 
+    def _error(self, sid: str, spec: dict | None, label: str, err: Exception) -> None:
+        self.errors += 1
+        if self.error_log is not None:
+            self.error_log.write(self.ds.dataset_id, sid, fingerprint(spec) if spec else "", label, err)
+        else:
+            print(f"  error {sid} {label}: {err!r}")
+
+    def zeroshot(self, sample: _Sample) -> None:
+        if not sample.has_references:
+            return
+        spec = zeroshot_anchor_spec(self.cfg)
+        try:
+            if self.pending(sample.sid, spec, map(_layer_metric, _GROUPS)):
+                scene = sample.zeroshot_scene
+                op = create("laplacian_pyramid_masked", levels=self.cfg.levels)
+                epe = epe_columns(scene, scene.oracle_warps)
+                for row in evaluate_point(scene, op, scene.oracle_warps, TruthMode.FUSION):
+                    self.put(sample.sid, spec, _layer_metric(row["layer"]),
+                             _numeric(row) | epe | {"calibrated": float(is_calibrated("oracle"))})
+        except Exception as e:
+            self._error(sample.sid, spec, _label(spec), e)
+        for name in self.cfg.zeroshot:
+            spec = None
+            try:
+                if name not in self._zs_identity:
+                    self._zs_identity[name] = model_identity(name)
+                spec = zeroshot_model_spec(self.cfg, self._zs_identity[name])
+                if not self.pending(sample.sid, spec, map(_layer_metric, _GROUPS)):
+                    continue
+                if name not in self._zs_methods:
+                    self._zs_methods[name] = _zeroshot_method(name)
+                rows = evaluate_zeroshot(sample.zeroshot_scene, sample.vis_display_rgb(), self._zs_methods[name])
+                for row in rows:
+                    self.put(sample.sid, spec, _layer_metric(row["layer"]), _numeric(row))
+            except Exception as e:
+                self._error(sample.sid, spec, _label(spec) if spec else f"item=zeroshot|model={name}", e)
+
     def complementarity(self) -> None:
         target = self.out_dir / "complementarity.md"
         if target.exists():
@@ -543,6 +656,16 @@ def summarize_protocol(out_dir: Path, dataset: ThreeBandDataset) -> tuple[Path, 
                   f"{r['operator']} | {r['truth_mode']} | {r['n_samples']} | {fmt(r.get('truth_PSNR'))} | "
                   f"{fmt(r.get('SCD'), digits=3)} | {fmt(r.get('Qabf'), digits=3)} | "
                   f"{fmt(r.get('hp_dev_RMSE'), 1e3)} | {fmt(r.get('epe_mean_px'))} |")
+    zs = [r for r in rows if r.get("item") == "zeroshot"]
+    if zs:
+        md += ["", "# Protocol summary: zeroshot (means over samples; FUSION truth mode, zero-shot input domain)", "",
+               "| condition | layer | model | registration | n | truth PSNR | truth SSIM | hp dev x1e-3 | EPE px | "
+               "runtime s |", "|---|---|---|---|---|---|---|---|---|---|"]
+        for r in zs:
+            md.append(f"| {r['condition']} | {r['metric'].removeprefix('layer_')} | {r['model']} | "
+                      f"{r['registration']} | {r['n_samples']} | {fmt(r.get('truth_PSNR'))} | "
+                      f"{fmt(r.get('truth_SSIM'), digits=3)} | {fmt(r.get('hp_dev_RMSE'), 1e3)} | "
+                      f"{fmt(r.get('epe_mean_px'))} | {fmt(r.get('runtime_s'), digits=3)} |")
     md_path = out_dir / "protocol_summary.md"
     md_path.write_text("\n".join(md) + "\n", encoding="utf-8", newline="\n")
     return csv_path, md_path
@@ -573,10 +696,11 @@ def run_protocol(config_path: Path, *, limit: int | None = None, samples: list[s
         ids = tuple(s for s in ids if s in set(samples))
     if limit is not None:
         ids = ids[:limit]
-    per_sample = [i for i in ("matrix", "sensitivity", "registration_study") if i in cfg.items]
+    per_sample = [i for i in ("matrix", "sensitivity", "registration_study", "zeroshot") if i in cfg.items]
     t0 = time.monotonic()
+    error_log = _ErrorLog(out_dir / "errors.jsonl")
     with ResultStore(out_dir / "results.jsonl") as store:
-        run = _Run(cfg, dataset, store, out_dir)
+        run = _Run(cfg, dataset, store, out_dir, error_log)
         variants_path = out_dir / "variants.json"
         if variants_path.exists():
             run.variants.update(load_json(variants_path))
@@ -600,6 +724,7 @@ def run_protocol(config_path: Path, *, limit: int | None = None, samples: list[s
                 run.errors += 1
                 print(f"  error complementarity: {e!r}")
         atomic_json(variants_path, run.variants)
+    error_log.close()
     if run.variants:
         csv_path, md_path = summarize_protocol(out_dir, dataset)
         print(f"wrote {csv_path} and {md_path}")

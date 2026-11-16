@@ -35,14 +35,14 @@ def _geometry(w: int, h: int) -> dict:
     }
 
 
-def _camera_config_toml(band: str) -> str:
+def _camera_config_toml(band: str, black_level_dn: float = 0.0) -> str:
     """camera_config_toml the renderer would echo for this band's sensor."""
     vis = band == "vis"
     return tomlio.toml_text({
         "sensor": {
             "cfa": "rggb" if vis else "mono",
             "exposure": {"time_s": 5e-5 if vis else 0.03},
-            "readout": {"adc_bits": 12 if vis else 14, "black_level_dn": 0.0,
+            "readout": {"adc_bits": 12 if vis else 14, "black_level_dn": black_level_dn,
                         "electrons_per_dn": 5.0 if vis else 1.0},
         },
         "isp": {"white_balance": [1.0, 1.0, 1.0],
@@ -56,7 +56,7 @@ def _signal(kind: str, unit: str, channels: list, cfa: str = "0", transfer: str 
             "channels": channels, "colour_space": colour_space, "storage": "float32"}
 
 
-def _write_observation(root: Path, sid: str, folder: str, band: str, size) -> dict:
+def _write_observation(root: Path, sid: str, folder: str, band: str, size, black_level_dn: float = 0.0) -> dict:
     """Write one observation's products under samples/<sid>/<folder>/v0001; return its manifest entry."""
     w, h = size
     vdir = root / "samples" / sid / folder / "v0001"
@@ -76,7 +76,7 @@ def _write_observation(root: Path, sid: str, folder: str, band: str, size) -> di
         "corrected": ("device_linear", "e-", "linear", ["Signal"], "device_native"),
         "display": ("display_srgb", "encoded sRGB", "sRGB", ["R", "G", "B"], "sRGB"),
     }
-    config = _camera_config_toml(band)
+    config = _camera_config_toml(band, black_level_dn)
     for name, (kind, unit, transfer, chans, cs) in signals.items():
         fname = f"frame_{name}.exr"
         if name == "display":
@@ -86,7 +86,7 @@ def _write_observation(root: Path, sid: str, folder: str, band: str, size) -> di
             raw = np.zeros((h, w), np.float32)  # constant-colour RGGB mosaic
             raw[0::2, 0::2], raw[0::2, 1::2] = 400.0, 600.0
             raw[1::2, 0::2], raw[1::2, 1::2] = 600.0, 300.0
-            exr.write_image(vdir / fname, {"Raw": raw})
+            exr.write_image(vdir / fname, {"Raw": raw + np.float32(black_level_dn)})
         elif name == "corrected":
             ramp = np.repeat(np.linspace(0.0, 100.0, w, dtype=np.float32)[None, :], h, 0)
             exr.write_image(vdir / fname, {chans[0]: ramp})
@@ -138,14 +138,17 @@ def _write_observation(root: Path, sid: str, folder: str, band: str, size) -> di
             "pixel_qa": {}}
 
 
-def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None, references: bool = False) -> Path:
+def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None, references: bool = False,
+                  vis_black_level_dn: float = 0.0) -> Path:
     """Write a tiny dataset under root and return its path.
 
     groups, if given, cycles sample split_groups (e.g. ["g0", "g1"] puts even
     samples in g0, odd in g1); default is one shared "fixture-group".
     references=False writes the v1 sample contract (no references, as older
     datasets have); True writes v2 with all three co-view references on the
-    VIS geometry and size, flagged in the index.
+    VIS geometry and size, flagged in the index. vis_black_level_dn puts a
+    pedestal under the VIS RAW mosaic and records it in camera_config_toml,
+    as the renderer does (64 DN for generic_cmos since Quantiloom 0.10.1).
     """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -155,7 +158,9 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None, refere
     for i in range(samples):
         sid = f"fixture_s{i:02d}"
         group = groups[i % len(groups)] if groups else "fixture-group"
-        observations = {band: _write_observation(root, sid, band, band, wh) for band, wh in sizes.items()}
+        observations = {band: _write_observation(root, sid, band, band, wh,
+                                                 vis_black_level_dn if band == "vis" else 0.0)
+                        for band, wh in sizes.items()}
         manifest = {"schema": "quantiloomfusion.sample", "schema_version": 2 if references else 1,
                     "dataset_id": dataset_id, "sample_id": sid, "scene_id": "fixture",
                     "split_group": group, "state": "complete",
@@ -167,7 +172,8 @@ def build_fixture(root: Path, samples: int = 2, size=(8, 6), groups=None, refere
         entry = {"sample_id": sid, "manifest": f"samples/{sid}/sample.json", "split_group": group}
         if references:
             manifest["references"] = {
-                band: {**_write_observation(root, sid, f"ref_{band}", band, size),
+                band: {**_write_observation(root, sid, f"ref_{band}", band, size,
+                                            vis_black_level_dn if band == "vis" else 0.0),
                        "geometry_from": "vis", "psf_sigma_px": 0.45}
                 for band in sizes}
             entry["references"] = True

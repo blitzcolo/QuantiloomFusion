@@ -53,6 +53,22 @@ def test_vis_raw_linear_adc(dataset):
     assert n.params()["scale_value"] == pytest.approx(4095.0)
 
 
+def test_vis_raw_linear_subtracts_the_black_level_the_renderer_applied(tmp_path):
+    # The same scene on a 64 DN pedestal (generic_cmos since Quantiloom 0.10.1): the
+    # black level comes from the product's camera_config_toml, not an assumed 0 DN.
+    ds = ThreeBandDataset(build_fixture(tmp_path, samples=1, vis_black_level_dn=64.0))
+    obs = next(iter(ds)).observations[Band.VIS]
+    assert obs.readout.black_level_dn == 64.0
+    assert float(ds.load(obs, "rawdn").min()) == 364.0
+    n = VisRawLinear(scale="adc")
+    out = normalized_input(ds, obs, n)
+    assert np.allclose(out, np.array([400.0, 600.0, 300.0]) / (4095.0 - 64.0), atol=1e-6)
+    assert n.params()["black_level_dn"] == 64.0 and n.params()["scale_value"] == pytest.approx(4031.0)
+    p = VisRawLinear(scale="percentile")
+    normalized_input(ds, obs, p)
+    assert p.params()["scale_value"] == pytest.approx(506.0)  # as without the pedestal
+
+
 def test_vis_raw_linear_percentile(dataset):
     obs = next(iter(dataset)).observations[Band.VIS]
     n = VisRawLinear(scale="percentile")
